@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    branches: [master, dev]
   push:
     branches: [master, dev]
 
@@ -10,22 +11,118 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "lint-skill placeholder — Session 05"
+      - name: banned-phrase grep on skill text
+        run: |
+          set -e
+          # narration-style.md declares the banned list as data, so we exclude it.
+          if grep -REin "(this ensures|for clarity|this is critical|\brobust\b|gracefully|straightforward|\bleverages\b|\bhandles\b|\bmanages\b|deals with|communicates with)" \
+              skills/codestory/SKILL.md \
+              skills/codestory/references/schema.md \
+              skills/codestory/references/trigger-rules.md; then
+            echo "FAIL: banned phrase found in shipped skill text"
+            exit 1
+          fi
+          echo "lint-skill: no banned phrases"
 
   validate-examples:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "validate-examples placeholder — Session 05"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: schema and coverage rules
+        run: |
+          set -e
+          for ex in medchat fastapi-starter nextjs-starter django-celery; do
+            f="examples/$ex/flows.json"
+            echo "validating $f"
+            jq empty "$f"
+            # every category is one of the four
+            jq -e '[.flows[].category] | all(. == "user" or . == "internal" or . == "background" or . == "build")' "$f" > /dev/null
+            # collect unit ids
+            unit_ids=$(jq -r '[.units[].id] | join(",")' "$f")
+            # every step from/to is in unit_ids
+            python3 - "$f" "$unit_ids" <<'PY'
+          import json, sys
+          fp, ids = sys.argv[1], set(sys.argv[2].split(","))
+          d = json.load(open(fp))
+          for fl in d["flows"]:
+              for i, s in enumerate(fl["steps"]):
+                  if s["from"] not in ids:
+                      print(f"FAIL: {fp} flow={fl['id']} step={i} from={s['from']!r} not in units")
+                      sys.exit(1)
+                  if s["to"] not in ids:
+                      print(f"FAIL: {fp} flow={fl['id']} step={i} to={s['to']!r} not in units")
+                      sys.exit(1)
+          # no orphan units (every unit referenced as from or to in at least one step)
+          referenced = set()
+          for fl in d["flows"]:
+              for s in fl["steps"]:
+                  referenced.add(s["from"])
+                  referenced.add(s["to"])
+          orphans = ids - referenced
+          if orphans:
+              print(f"FAIL: {fp} orphan units: {sorted(orphans)}")
+              sys.exit(1)
+          PY
+          done
+          echo "validate-examples: all four pass"
 
   render-examples:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "render-examples placeholder — Session 05"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: render every example x every theme, enforce byte budget
+        run: |
+          set -e
+          for ex in medchat fastapi-starter nextjs-starter django-celery; do
+            for theme in cococream dark minimal nothing-design; do
+              out="/tmp/ci-render-$ex-$theme.html"
+              python3 ops/render.py --theme "$theme" --data "examples/$ex/flows.json" --out "$out"
+              size=$(wc -c < "$out")
+              if [ "$size" -ge 250000 ]; then
+                echo "FAIL: $out is $size bytes (>= 250000)"
+                exit 1
+              fi
+              echo "$ex/$theme: $size bytes"
+            done
+          done
+      - name: structural lock on themes
+        run: |
+          set -e
+          # any layout-modifying CSS outside a comment block fails the gate.
+          if grep -En "(grid-template|flex-direction|position\s*:\s*(absolute|fixed))" \
+              renderer/themes/dark.css \
+              renderer/themes/minimal.css \
+              renderer/themes/nothing-design.css \
+              | grep -v "^[^:]*:\s*\(//\|/\*\|\s*\*\)"; then
+            echo "FAIL: layout-modifying CSS in theme file"
+            exit 1
+          fi
+          echo "structural lock: clean"
 
   snapshot-counts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "snapshot-counts placeholder — Session 05"
+      - name: diff counts against baseline
+        run: |
+          set -e
+          for ex in medchat fastapi-starter nextjs-starter django-celery; do
+            f="examples/$ex/flows.json"
+            exp_flows=$(jq -r ".\"$ex\".flows" .github/snapshots/baseline.json)
+            exp_units=$(jq -r ".\"$ex\".units" .github/snapshots/baseline.json)
+            exp_steps=$(jq -r ".\"$ex\".steps" .github/snapshots/baseline.json)
+            act_flows=$(jq '.flows | length' "$f")
+            act_units=$(jq '.units | length' "$f")
+            act_steps=$(jq '[.flows[].steps[]] | length' "$f")
+            if [ "$exp_flows" != "$act_flows" ] || [ "$exp_units" != "$act_units" ] || [ "$exp_steps" != "$act_steps" ]; then
+              echo "FAIL: $ex drift — expected flows=$exp_flows units=$exp_units steps=$exp_steps; actual flows=$act_flows units=$act_units steps=$act_steps"
+              exit 1
+            fi
+            echo "$ex: flows=$act_flows units=$act_units steps=$act_steps (matches baseline)"
+          done
