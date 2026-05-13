@@ -6,17 +6,47 @@ This file documents every field the skill emits and every field a hand-edit may 
 
 ```json
 {
-  "units": [ Unit, ... ],
-  "flows": [ Flow, ... ],
-  "glossary": { "term": "definition", ... }
+  "project_name": "cliproxyapi",
+  "lead": "One-sentence project blurb shown under the home headline.",
+  "actors":     { "<id>": { "label": "...", "tech": "..." }, ... },
+  "units":      [ Unit, ... ],
+  "categories": [ Category, ... ],
+  "flows":      [ Flow, ... ],
+  "glossary":   { "term": "definition", ... }
 }
 ```
 
-Three top-level keys, no others.
+Seven top-level keys. The skill emits ALL of them.
 
-- `units` — array of every service / package / app / module the book references. Every `from` and `to` in every step MUST point at a unit id declared here.
+- `project_name` — string. Shown in the page title (`<project> stories`) and the home header.
+- `lead` — string, optional. One-sentence project blurb. The renderer falls back to its built-in lead if absent.
+- `actors` — **object keyed by id** mapping `id` → `{ label, tech }`. This is the shape the renderer reads at runtime (`actors[step.from].label`). Every step's `from` and `to` MUST be a key here.
+- `units` — array of `Unit` records (`{id, kind, label, role}`). The v1 / canonical form, kept for external tooling. The skill emits `units` AND `actors` together — same source data, two views. The renderer normalises automatically if only one is present, but emitting both is the contract.
+- `categories` — array of `Category` records. One entry per distinct `flow.category` value actually used. The renderer draws home-page chapter cards from this list. If empty / missing, the renderer derives placeholders from `flow.category` values but the chapter titles and blurbs are then generic.
 - `flows` — array of stories. Each flow is one runtime path through the system.
 - `glossary` — object mapping a term to a one-sentence definition. The renderer turns these into a side panel.
+
+### Why the actors / units duality
+
+The renderer's JavaScript was lifted from a hand-authored medchat artefact and reads `actors` as an object. The skill's discovery output is more naturally an array of records (`units`). Rather than rewrite the renderer or constrain the skill, the contract is: emit both. The renderer normalises if only one shape arrives. See `SKILL.md` §3 for the canonical mirror example.
+
+## `Category`
+
+```json
+{
+  "id": "user",
+  "title": "When a user does something",
+  "blurb": "Routes that fire when a homelab service hits the gateway.",
+  "mood": "default"
+}
+```
+
+Fields:
+
+- `id` — one of: `user`, `internal`, `background`, `build`. Matches `flow.category` values.
+- `title` — chapter headline shown on the home page. Reads like a book chapter title.
+- `blurb` — one or two sentences describing the chapter. Shown under the title.
+- `mood` — optional rendering hint: `default`, `night`, `build`. Affects background tint for the chapter's scene panel.
 
 ## `Unit`
 
@@ -126,12 +156,12 @@ Free-form term → one-sentence definition. The renderer alphabetises. Hand-edit
 
 ## Validation summary
 
-The skill rejects a file that fails any of the following:
+The skill rejects a file that fails any of the following (see SKILL.md §9 R11 for the runtime guard):
 
-- Three top-level keys exactly: `units`, `flows`, `glossary`.
-- Every `unit.id` unique.
-- Every `flow.id` unique.
-- Every `flow.category` is one of `user`, `internal`, `background`, `build`.
-- Every `step.from` and `step.to` references a real `unit.id`.
-- Every step is either cited (carries a `file:line` token) or marked `unknown:true` with a non-empty `reason`.
+- `project_name` is a non-empty string.
+- `actors` is a non-empty object keyed by id; `units` is a non-empty array. Both required; they mirror the same data.
+- `categories` is a non-empty array with one entry per distinct `flow.category` value present.
+- `flows` is a non-empty array. Every `flow.id` unique. Every `flow.category` is one of `user`, `internal`, `background`, `build`. Every flow has `id`, `name`, `category`, `narration`, `steps`.
+- Every `step` has `from`, `to`, `transport`, `payload`. Every `step.from` and `step.to` references a key in `actors`.
+- Every step is either cited (carries a `file:line` token in `note` or `payload`) or marked `unknown:true` with a non-empty `reason`.
 - No banned phrase appears in any `flow.narration`, `step.payload`, or `step.note` (see `references/narration-style.md`).

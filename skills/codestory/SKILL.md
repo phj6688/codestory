@@ -149,6 +149,74 @@ The full field reference lives in `references/schema.md`. The runtime contract f
 
 A step is one record with these fields: `from`, `to`, `transport`, `payload`, optional `note`, optional `unknown`, optional `reason`.
 
+### Output JSON shape — canonical example (copy this skeleton, do not invent fields)
+
+The skill writes a single `flows.json` (embedded inside `<script id="codestory-data">` in the HTML, unless `--split` is used). The renderer reads specific keys; emitting different keys produces a broken render that looks like a static demo. The skill MUST emit this exact top-level shape:
+
+```json
+{
+  "project_name": "cliproxyapi",
+  "lead": "OpenAI-compatible gateway routing chat completions to local Ollama and remote Claude over OAuth.",
+  "actors": {
+    "client": { "label": "Client", "tech": "homelab service on the tailnet" },
+    "gateway": { "label": "Gateway", "tech": "FastAPI :18789" },
+    "ollama": { "label": "Ollama", "tech": "local model server :11434" }
+  },
+  "units": [
+    { "id": "client",  "kind": "service", "label": "Client",  "role": "homelab service on the tailnet" },
+    { "id": "gateway", "kind": "service", "label": "Gateway", "role": "FastAPI :18789" },
+    { "id": "ollama",  "kind": "service", "label": "Ollama",  "role": "local model server :11434" }
+  ],
+  "categories": [
+    { "id": "user",       "title": "When a user does something",  "blurb": "Routes that fire when a homelab service hits the gateway.", "mood": "default" },
+    { "id": "internal",   "title": "Behind the scenes",            "blurb": "Internal routing, alias resolution, streaming.",            "mood": "default" },
+    { "id": "background", "title": "Scheduled jobs",               "blurb": "Token refresh, container watchdog.",                        "mood": "night"   },
+    { "id": "build",      "title": "Deploy and setup",             "blurb": "Container boot, OAuth onboarding.",                         "mood": "build"   }
+  ],
+  "flows": [
+    {
+      "id": "chat-completion",
+      "name": "Chat completion request",
+      "title": "Chat completion request",
+      "category": "user",
+      "color": "var(--accent)",
+      "trigger": "POST /v1/chat/completions",
+      "narration": "A homelab service posts an OpenAI-style chat request to the gateway. The gateway validates the bearer token, resolves the model alias, and streams the response from the upstream provider.",
+      "steps": [
+        {
+          "from": "client",
+          "to": "gateway",
+          "transport": "HTTP POST /v1/chat/completions",
+          "payload": "Authorization: Bearer; body: { model, messages, stream } — src=config.yaml:8",
+          "note": "host: \"\" and port: 18789 in config bind the listener inside the container.",
+          "unknown": false
+        }
+      ],
+      "glossary_refs": ["bearer", "model-alias"]
+    }
+  ],
+  "glossary": {
+    "bearer": "An opaque token in the Authorization header that authenticates the caller.",
+    "model-alias": "A string in the request body the gateway maps to an upstream provider."
+  }
+}
+```
+
+**Mirror keys — both forms MUST be emitted** so the renderer and any v1-aware consumer both work:
+
+- `actors` (object keyed by id, values `{label, tech}`) AND `units` (array of `{id, kind, label, role}`). Same source data, two views.
+- Each flow gets `name` AND `title` (same string). The renderer uses `name`; v1 consumers use `title`.
+
+**Required keys — empty or missing means the render breaks:**
+
+- `project_name` — non-empty string. Drives the page title and header.
+- `actors` — non-empty object. Every step's `from` and `to` MUST be a key in `actors`.
+- `categories` — non-empty array with one entry per distinct value of `flow.category` actually used. The id must be one of `user`, `internal`, `background`, `build`. The `title` is the chapter headline shown on the home page; the `blurb` is the chapter description.
+- `flows[]` — non-empty array. Each flow has `id`, `name`, `category`, `narration`, `steps[]`.
+- Each `step` — `from`, `to`, `transport`, `payload` minimum. `note` optional. `unknown` only when the citation rule forces it (see Hard rule below).
+
+**Forbidden top-level keys:** `meta`, `lineRef`, `body`, `label`, `title` at the step level. These were the shapes the skill hallucinated in an early CLIproxyAPI run and are not part of the contract. The renderer ignores them.
+
 ### Hard rule on citations
 
 This is the R1 mitigation. It is not a guideline. The skill enforces it before write.
@@ -407,6 +475,55 @@ These are the five scar mitigations framed as runtime guards. Each maps to a che
 ### R9 — reading budget blown
 
 **Guard:** per-pass file-read counters compared against 30 / 5 per unit / 3 per flow caps; total counter compared against 200. **Action on failure:** stop further discovery, emit what is collected so far, surface a budget-exhausted notice with a `--scope` narrowing recommendation. **Place in the flow:** runs continuously across passes 1–3 of the playbook. See §7.
+
+### R11 — output schema gaps
+
+**Why this exists:** an early CLIproxyAPI run emitted `{ meta, glossary, flows }` with no `actors`, no `categories`, and step shapes using `{label, title, body, file, lineRef}` instead of `{from, to, transport, payload}`. The HTML still loaded but the diagram was empty and the home page had no chapter cards — the skill produced something that looked like a render but had nothing for the renderer to render. This guard prevents that class of failure.
+
+**Guard — pre-write schema validation.** After the citation guard (R1) and the banned-phrase guard (R4), and before the JSON is serialised to disk, the skill MUST run this validation against the in-memory `data` object:
+
+```python
+def validate_output_shape(data):
+    errors = []
+    # Required top-level keys
+    if not isinstance(data.get("project_name"), str) or not data["project_name"].strip():
+        errors.append("project_name must be a non-empty string")
+    if not isinstance(data.get("actors"), dict) or not data["actors"]:
+        errors.append("actors must be a non-empty object keyed by id")
+    if not isinstance(data.get("units"), list) or not data["units"]:
+        errors.append("units must be a non-empty array (mirror of actors)")
+    if not isinstance(data.get("categories"), list) or not data["categories"]:
+        errors.append("categories must be a non-empty array")
+    if not isinstance(data.get("flows"), list) or not data["flows"]:
+        errors.append("flows must be a non-empty array")
+
+    # Categories must cover every flow.category in use
+    cat_ids = {c.get("id") for c in data.get("categories", []) if isinstance(c, dict)}
+    seen_flow_cats = {f.get("category") for f in data.get("flows", []) if isinstance(f, dict)}
+    missing = (seen_flow_cats - cat_ids) - {None}
+    if missing:
+        errors.append(f"categories missing entries for: {sorted(missing)}")
+
+    # Each flow + step shape
+    actor_ids = set(data.get("actors", {}).keys())
+    for f in data.get("flows", []):
+        for required in ("id", "name", "category", "narration", "steps"):
+            if not f.get(required):
+                errors.append(f"flow {f.get('id', '?')!r} missing {required!r}")
+        for i, s in enumerate(f.get("steps", []) or []):
+            for required in ("from", "to", "transport", "payload"):
+                if not s.get(required):
+                    errors.append(f"flow {f.get('id', '?')!r} step {i} missing {required!r}")
+            if s.get("from") and s["from"] not in actor_ids:
+                errors.append(f"flow {f.get('id', '?')!r} step {i} from={s['from']!r} not in actors")
+            if s.get("to") and s["to"] not in actor_ids:
+                errors.append(f"flow {f.get('id', '?')!r} step {i} to={s['to']!r} not in actors")
+    return errors
+```
+
+**Action on failure.** The skill does NOT write the file with errors present. It attempts ONE regeneration pass, narrow in scope: fill in the missing pieces (build `actors` from referenced ids if it was forgotten; build `categories` from observed `flow.category` values; mirror `name`→`title`; surface step shape gaps as `unknown:true` with a `reason`). It re-runs the validator. If errors remain, it aborts the write and reports the errors verbatim to the user — one line per error, plus a one-line summary of what would need to be filled in to retry.
+
+**Place in the flow.** Runs immediately before serialisation. It is the last gate. After it passes, the skill writes the file and the renderer is guaranteed something to render against.
 
 ---
 

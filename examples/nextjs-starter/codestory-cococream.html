@@ -624,7 +624,64 @@
 
 <script>
 (() => {
-  const data = JSON.parse(document.getElementById("codestory-data").textContent);
+  const rawData = JSON.parse(document.getElementById("codestory-data").textContent);
+  const data = normalizeSchema(rawData);
+
+  function normalizeSchema(d) {
+    if (!d || typeof d !== "object") return d;
+    // actors: prefer object form. Build from units array if missing.
+    // Last resort: derive placeholders from step.from / step.to references.
+    if (!d.actors || typeof d.actors !== "object" || Array.isArray(d.actors)) {
+      const actors = {};
+      if (Array.isArray(d.units)) {
+        d.units.forEach(u => {
+          if (u && u.id) actors[u.id] = { label: u.label || u.id, tech: u.role || u.kind || "" };
+        });
+      }
+      (d.flows || []).forEach(f => (f.steps || []).forEach(s => {
+        if (s && s.from && !actors[s.from]) actors[s.from] = { label: s.from, tech: "" };
+        if (s && s.to && !actors[s.to]) actors[s.to] = { label: s.to, tech: "" };
+      }));
+      d.actors = actors;
+    }
+    // categories: build from distinct flow.category values if missing or empty.
+    if (!Array.isArray(d.categories) || d.categories.length === 0) {
+      const titles = {
+        user: "When a user does something",
+        internal: "Behind the scenes",
+        background: "Scheduled jobs",
+        build: "Deploy and setup"
+      };
+      const moods = { background: "night", build: "build" };
+      const seen = new Set();
+      d.categories = [];
+      (d.flows || []).forEach(f => {
+        if (f && f.category && !seen.has(f.category)) {
+          seen.add(f.category);
+          d.categories.push({
+            id: f.category,
+            title: titles[f.category] || f.category,
+            blurb: "",
+            mood: moods[f.category] || "default"
+          });
+        }
+      });
+    }
+    // flow name / narration fallbacks.
+    (d.flows || []).forEach(f => {
+      if (!f) return;
+      if (!f.name && f.title) f.name = f.title;
+      if (!f.narration && f.lead) f.narration = f.lead;
+    });
+    // step narration / payload fallbacks. from / to have no fallback by design.
+    (d.flows || []).forEach(f => (f.steps || []).forEach(s => {
+      if (!s) return;
+      if (!s.narration && s.body) s.narration = s.body;
+      if (!s.payload && s.title) s.payload = s.title;
+    }));
+    return d;
+  }
+
   if (!data || !data.flows) {
     document.getElementById("cats").innerHTML =
       '<div style="color:var(--mute);font-family:var(--font-mono);padding:24px;">No flows data injected. Run ops/render.py with --data &lt;flows.json&gt;.</div>';
