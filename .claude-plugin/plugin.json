@@ -2,12 +2,14 @@
   "name": "codestory",
   "version": "0.1.0",
   "description": "Turn any codebase into a beautifully animated book of workflows. Single HTML file.",
-  "author": { "name": "Peyman", "email": "peyman.h.j@gmail.com" },
+  "author": {
+    "name": "Peyman",
+    "email": "peyman.h.j@gmail.com"
+  },
   "repository": "https://github.com/phj6688/codestory",
   "license": "MIT",
   "homepage": "https://github.com/phj6688/codestory",
   "keywords": ["documentation", "visualization", "workflows", "sequence-diagram", "claude-code", "skill"],
-  "categories": ["documentation", "visualization"],
-  "commands": [{ "name": "codestory", "path": "commands/codestory.md" }],
-  "skills": [{ "name": "codestory", "path": "skills/codestory/SKILL.md" }]
+  "commands": "./commands/",
+  "skills": "./skills/"
 }
