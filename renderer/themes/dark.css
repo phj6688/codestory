@@ -1,0 +1,27 @@
+/*
+ * codestory · theme: dark
+ *
+ * near-black bg, warm-grey ink, amber-coral accent.
+ * variable overrides only — no structural CSS (no layout grid, no flex
+ * axis swaps, no out-of-flow positioning). scar R6 contract.
+ */
+
+:root {
+  --bg: #0e0d0c;
+  --bg-2: #18171a;
+  --panel: #1a1916;
+  --panel-2: #232220;
+  --line: #3a3633;
+  --ink: #efe6d8;
+  --mute: #968b7b;
+  --dim: #5e564b;
+  --accent: #e87f5c;
+  --accent-2: #c4623f;
+  --accent-soft: rgba(232, 127, 92, 0.18);
+  --warn: #d6a142;
+  --packet: #efe6d8;
+  --paper-dot: rgba(239, 230, 216, 0.04);
+  --card-radius: 8px;
+  --shadow-offset: 4px;
+  --bg-pattern: radial-gradient(circle, var(--paper-dot) 1px, transparent 1px) 0 0 / 22px 22px;
+}

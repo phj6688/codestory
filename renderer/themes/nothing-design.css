@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Space+Mono&display=swap');
+/*
+ * codestory · theme: nothing-design
+ *
+ * strict compliance with ~/.claude/skills/nothing-design/SKILL.md:
+ *   - OLED black bg, monochrome canvas
+ *   - red used only as interrupt accent
+ *   - three-layer hierarchy (display / primary / tertiary)
+ *   - no shadows
+ *   - Space Grotesk for headings/body, Space Mono for labels/code
+ *
+ * scar R3: every type-family chain declares system fallbacks so offline render
+ * keeps Nothing's typographic rules intact. Google Fonts @import is the
+ * ONE documented external dependency for this theme.
+ *
+ * variable overrides + type-family overrides only — no layout-modifying CSS.
+ * see TASKSPEC §5 and AUDIT.md scar R3 / R6.
+ */
+
+:root {
+  --bg: #000000;
+  --bg-2: #0a0a0a;
+  --panel: #0a0a0a;
+  --panel-2: #141414;
+  --line: #2a2a2a;
+  --ink: #ffffff;
+  --mute: rgba(255, 255, 255, 0.6);
+  --dim: rgba(255, 255, 255, 0.4);
+  --accent: #ffffff;
+  --accent-2: rgba(255, 255, 255, 0.9);
+  --accent-soft: rgba(255, 255, 255, 0.08);
+  --warn: #D71921;
+  --packet: #ffffff;
+  --paper-dot: rgba(255, 255, 255, 0);
+  --font-serif: 'Space Grotesk', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: 'Space Grotesk', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Space Mono', 'JetBrains Mono', ui-monospace, monospace;
+  --card-radius: 4px;
+  --shadow-offset: 0px;
+  --bg-pattern: none;
+}
+
+/* no shadows anywhere — Nothing anti-pattern */
+.cat,
+.story-card,
+.shortcuts,
+.glossary,
+.help-btn.attention {
+  box-shadow: none;
+}
+
+.cat:hover,
+.story-card:hover {
+  box-shadow: none;
+}
+
+/* tertiary layer: Space Mono ALL CAPS for labels */
+.cat .chap,
+.story-card .meta,
+.caption .step-label,
+.shortcuts h4,
+.glossary h4 {
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-family: 'Space Mono', 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* primary heading weight: Space Grotesk medium, not italic */
+.cat .num,
+.chapter-inner h2 em,
+.title-name {
+  font-style: normal;
+  font-weight: 500;
+  font-family: 'Space Grotesk', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+}
