@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [0.1.2] - 2026-05-13
+
+### Changed
+
+- Theme selection moved to activation step 0 — the skill prompts before discovery starts when no `--theme` flag and no repo manifest entry exists. Previous behaviour silently fell back to `cococream`. Resolution order: `--theme` flag → repo manifest → interactive prompt → silent `cococream` (only with new `--no-prompt` flag).
+
+### Added
+
+- `--no-prompt` flag on `/codestory` to suppress the interactive theme picker in scripted / non-interactive contexts.
+- README `## Use` section shows the prompt format so first-time users see the theme menu before running.
+
 ## [0.1.1] - 2026-05-13
 
 ### Added
@@ -31,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI pipeline: `lint-skill`, `validate-examples`, `render-examples`, `snapshot-counts`, plus the PR byte-budget bot enforcing the < 250 KB rendered-HTML budget.
 - Release notes draft at `docs/release-notes/v0.1.0.md` covering examples, themes, discovery model, install path, and roadmap.
 
-[Unreleased]: https://github.com/phj6688/codestory/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/phj6688/codestory/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/phj6688/codestory/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/phj6688/codestory/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/phj6688/codestory/releases/tag/v0.1.0

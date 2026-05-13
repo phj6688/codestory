@@ -23,6 +23,30 @@ Three load-bearing facts to keep in mind at activation:
 - The bundled renderer assets live at `renderer/template.html` and `renderer/themes/*.css` inside the plugin install directory. The skill reads them at render time; it does not copy them into the user's repo.
 - A prior `codestory.html` or `codestory.json` in the working directory is treated as the source of hand-edits and merged in. The skill does NOT clobber it.
 
+### Activation step 0 — resolve the theme before any discovery work
+
+The very first thing the skill does, before reading a single source file, is resolve which theme to render with. Resolution order (first match wins):
+
+1. `--theme <name>` or `--theme <path>` on the slash command.
+2. Repo manifest: `package.json` `"codestory": { "theme": "<name>" }` or `pyproject.toml` `[tool.codestory] theme = "<name>"`.
+3. **Interactive prompt to the user** (default path). The skill MUST ask, not silently fall back to `cococream`. The prompt is:
+
+   ```
+   Which theme would you like?
+     1) cococream         (default, warm paper)
+     2) dark              (near-black, amber accent)
+     3) minimal           (mono, print-friendly)
+     4) nothing-design    (OLED, red interrupt)
+
+   Enter number or name:
+   ```
+
+   Accepts: `1`, `2`, `3`, `4`, or any of the four names case-insensitive, or empty input to take the printed default `cococream`. On any other input, re-prompt once with the same options; on a second bad input, abort discovery with a one-line error naming the four valid choices.
+
+4. `cococream` silently — only when the slash-command form was `/codestory --no-prompt` or when running in a non-interactive context (no user channel available). The skill records the silent fallback in the discovery summary.
+
+The chosen theme is recorded immediately and passed to the renderer at output time (§8). Theme choice does not change discovery — same flows, same units, same JSON; only the CSS injection differs.
+
 ---
 
 ## 2. The seven-step discovery playbook
@@ -340,12 +364,13 @@ The `<script id="codestory-data">` block holds the JSON payload as inert text. T
 
 ### Theme resolution order
 
-First match wins:
+The theme is resolved at **activation step 0** (see §1), not at output time. Resolution order (first match wins):
 
-1. `cococream` — default.
-2. `--theme <name>` from the command line — looked up in `renderer/themes/<name>.css`. Recognised names: `cococream`, `dark`, `minimal`, `nothing-design`.
-3. `--theme <path>` from the command line — read as a custom CSS file. Triggered when the value contains a path separator or ends in `.css`.
-4. Repo manifest — `package.json` `"codestory": { "theme": "<name>" }` or `pyproject.toml` `[tool.codestory] theme = "<name>"`.
+1. `--theme <name>` from the command line — looked up in `renderer/themes/<name>.css`. Recognised names: `cococream`, `dark`, `minimal`, `nothing-design`.
+2. `--theme <path>` from the command line — read as a custom CSS file. Triggered when the value contains a path separator or ends in `.css`.
+3. Repo manifest — `package.json` `"codestory": { "theme": "<name>" }` or `pyproject.toml` `[tool.codestory] theme = "<name>"`.
+4. **Interactive prompt** — the skill asks the user which theme. This is the default path when no flag and no manifest entry exists. The prompt format is documented in §1.
+5. `cococream` — silent fallback ONLY when `--no-prompt` is passed or no user channel is available. The fallback is recorded in the discovery summary.
 
 The chosen theme name is recorded in an HTML comment near the top of the document so a reader can reproduce the render.
 

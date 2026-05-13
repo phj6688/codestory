@@ -19,16 +19,31 @@ Four flags, optional, combine freely.
 - `--output <path>` — write target. Default is `./codestory.html` relative to the working directory.
 - `--split` — write the data block to a sibling `.json` file next to the HTML; the HTML loads it via fetch. Default is to embed inside `<script id="codestory-data" type="application/json">`.
 - `--scope <category>` — restrict discovery to one of the four chapters: `user`, `internal`, `background`, `build`. The skill emits flows from that chapter only and reports the chapters it skipped.
-- `--theme <name-or-path>` — pick the theme. A bare name resolves against the bundled themes (`cococream`, `dark`, `minimal`, `nothing-design`); a path or any value ending in `.css` is read as a custom theme file.
+- `--theme <name-or-path>` — pick the theme up front, no prompt. A bare name resolves against the bundled themes (`cococream`, `dark`, `minimal`, `nothing-design`); a path or any value ending in `.css` is read as a custom theme file.
+- `--no-prompt` — suppress the interactive theme prompt; use `cococream` (or the manifest default) silently. Use this in scripts.
 
 ## Theme resolution
 
-First match wins:
+The theme is picked at the very start of the run, before any source files are read. Resolution order (first match wins):
 
-1. `cococream` (default).
-2. `--theme <name>` from the command line.
-3. `--theme <path>` from the command line (custom CSS file).
-4. Repo manifest: `package.json` `"codestory": { "theme": "<name>" }` or `pyproject.toml` `[tool.codestory] theme = "<name>"`.
+1. `--theme <name>` from the command line.
+2. `--theme <path>` from the command line (custom CSS file).
+3. Repo manifest: `package.json` `"codestory": { "theme": "<name>" }` or `pyproject.toml` `[tool.codestory] theme = "<name>"`.
+4. **Interactive prompt** — the skill asks which theme to use (default when no flag / manifest is present):
+
+   ```
+   Which theme would you like?
+     1) cococream         (default, warm paper)
+     2) dark              (near-black, amber accent)
+     3) minimal           (mono, print-friendly)
+     4) nothing-design    (OLED, red interrupt)
+
+   Enter number or name:
+   ```
+
+   Accepts a number, a name, or empty input (takes the printed default).
+
+5. `cococream` — silent fallback only with `--no-prompt` or when no user channel exists.
 
 ## Re-run merge
 

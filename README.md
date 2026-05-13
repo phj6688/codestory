@@ -21,6 +21,16 @@ In any repo:
 /codestory
 ```
 
+You'll be asked which theme to use (or pass `--theme dark` etc. to skip the prompt):
+
+```
+Which theme would you like?
+  1) cococream         (default, warm paper)
+  2) dark              (near-black, amber accent)
+  3) minimal           (mono, print-friendly)
+  4) nothing-design    (OLED, red interrupt)
+```
+
 Open the resulting `codestory.html` in a browser.
 
 ## Themes
