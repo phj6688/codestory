@@ -1,0 +1,56 @@
+/*
+ * codestory · theme: minimal
+ *
+ * pure white / black, no colour. fade-only animation overrides for print,
+ * PDF export, and monochrome screens. variable overrides + a small set of
+ * animation rule overrides only — no layout-modifying selectors. scar R6.
+ *
+ * allowed in this file: variable overrides, animation / transition rules,
+ * @keyframes. NOT allowed: layout grid declarations, flex axis swaps,
+ * out-of-flow positioning, targeting structural selectors.
+ */
+
+:root {
+  --bg: #ffffff;
+  --bg-2: #fafafa;
+  --panel: #ffffff;
+  --panel-2: #f4f4f4;
+  --line: #d4d4d4;
+  --ink: #111111;
+  --mute: #555555;
+  --dim: #999999;
+  --accent: #111111;
+  --accent-2: #000000;
+  --accent-soft: rgba(0, 0, 0, 0.06);
+  --warn: #4a4a4a;
+  --packet: #111111;
+  --paper-dot: rgba(0, 0, 0, 0);
+  --card-radius: 4px;
+  --shadow-offset: 0px;
+  --bg-pattern: none;
+}
+
+/* fade-only animation: kill transforms and complex transitions */
+.cat,
+.story-card,
+.player-top .ctrl-btn,
+.kbd,
+.shortcuts,
+.glossary,
+.help-btn {
+  transition: opacity 0.2s ease, color 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.cat:hover,
+.story-card:hover {
+  transform: none;
+}
+
+.kbd.pressed {
+  transform: none;
+}
+
+@keyframes helpPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}

@@ -1,0 +1,35 @@
+/*
+ * codestory · theme: _starter
+ *
+ * copy this file to renderer/themes/<your-theme>.css and edit the values.
+ * every variable from TASKSPEC §5 is declared with a one-line role comment.
+ *
+ * RULES (enforced by CI on every theme):
+ *   - variable overrides only (and animation rule overrides for fade-only themes)
+ *   - NO layout-modifying CSS: grid-template, flex-direction, position
+ *     absolute/fixed targeting structural selectors. see scar R6.
+ *   - every font-family declares system fallbacks. see scar R3.
+ */
+
+:root {
+  --bg: #f5ead2;             /* page background — the dominant surface colour */
+  --bg-2: #ede0bf;           /* secondary surface — sidebar / panel-on-page tone */
+  --panel: #faf3e0;          /* card / panel face — what story cards sit on */
+  --panel-2: #f2e6c8;        /* deeper panel — speech bubble fill, pressed-state bg */
+  --line: #cdb98a;           /* hairline dividers, card borders */
+  --ink: #1a140f;            /* primary text colour */
+  --mute: #6b5a44;           /* secondary text — taglines, labels */
+  --dim: #b4a47d;            /* tertiary text — meta lines, timestamps */
+  --accent: #d9462b;         /* primary accent — chapter numerals, active states */
+  --accent-2: #b53619;       /* deeper accent — pressed key, hover-locked borders */
+  --accent-soft: rgba(217, 70, 43, 0.12); /* tinted accent — pill bg, soft chrome */
+  --warn: #b8651a;           /* unknown-step / warning state colour */
+  --packet: #1a140f;         /* SVG animated packet fill */
+  --paper-dot: rgba(120, 95, 60, 0.18); /* page dot-pattern tone (transparent allowed) */
+  --font-serif: "Iowan Old Style", "Source Serif Pro", Charter, Georgia, "Times New Roman", serif; /* display / body serif */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", system-ui, sans-serif; /* UI sans — buttons, hints */
+  --font-mono: ui-monospace, "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace; /* tech labels, transports, payloads */
+  --card-radius: 8px;        /* corner radius for cards, pills, panels */
+  --shadow-offset: 4px;      /* drop-shadow offset for floating panels (0 disables) */
+  --bg-pattern: radial-gradient(circle, var(--paper-dot) 1px, transparent 1px) 0 0 / 22px 22px; /* repeatable bg pattern, 'none' to disable */
+}
