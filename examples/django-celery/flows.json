@@ -1,0 +1,289 @@
+{
+  "project_name": "django-celery",
+  "units": [
+    {
+      "id": "browser",
+      "kind": "service",
+      "label": "Browser",
+      "role": "End user submitting the order form."
+    },
+    {
+      "id": "django",
+      "kind": "service",
+      "label": "Django app",
+      "role": "Django process serving views and dispatching tasks to the Celery broker."
+    },
+    {
+      "id": "broker",
+      "kind": "service",
+      "label": "Redis broker",
+      "role": "Celery broker that queues task messages between Django and the worker pool."
+    },
+    {
+      "id": "worker",
+      "kind": "service",
+      "label": "Celery worker",
+      "role": "Long-running worker process that runs send_receipt, reconcile_inventory, and nightly_purge."
+    },
+    {
+      "id": "db",
+      "kind": "service",
+      "label": "Postgres",
+      "role": "Primary store for Order, Receipt, StockAdjustment rows."
+    },
+    {
+      "id": "smtp",
+      "kind": "service",
+      "label": "SMTP relay",
+      "role": "External mail relay that accepts receipt POSTs."
+    },
+    {
+      "id": "beat",
+      "kind": "service",
+      "label": "Celery beat",
+      "role": "Scheduler process that fires CELERY_BEAT_SCHEDULE entries on the configured cron expressions."
+    }
+  ],
+  "flows": [
+    {
+      "id": "order-create",
+      "category": "user",
+      "title": "Customer submits the order form",
+      "name": "Customer submits the order form",
+      "tagline": "POST /orders → row saved → two tasks queued → 201.",
+      "color": "#10b981",
+      "trigger": "browser",
+      "glossary_terms": ["Celery task", "Apply async"],
+      "narration": "A browser POSTs the order form to Django. The view validates and saves the order row, then queues send_receipt and reconcile_inventory before returning 201.",
+      "steps": [
+        {
+          "from": "browser",
+          "to": "django",
+          "transport": "HTTP POST",
+          "payload": "POST /orders Content-Type=application/x-www-form-urlencoded body: order form fields",
+          "note": "src=orders/views.py:24",
+          "narration": "The order form posts to /orders. The view enforces POST and binds the body to the OrderForm."
+        },
+        {
+          "from": "django",
+          "to": "db",
+          "transport": "SQL",
+          "payload": "INSERT INTO orders_order (...) VALUES (...) RETURNING id",
+          "note": "src=orders/views.py:24",
+          "narration": "form.save() runs the INSERT against the orders_order table and returns the saved instance."
+        },
+        {
+          "from": "django",
+          "to": "broker",
+          "transport": "AMQP publish",
+          "payload": "send_receipt.delay(order.id) → message on the 'celery' default queue.",
+          "note": "src=orders/tasks.py:18",
+          "narration": "The view enqueues the receipt task. .delay places a message on Redis tagged for the send_receipt route."
+        },
+        {
+          "from": "django",
+          "to": "broker",
+          "transport": "AMQP publish",
+          "payload": "reconcile_inventory.delay(order.id) → message on the 'celery' default queue.",
+          "note": "src=orders/tasks.py:44",
+          "narration": "The view enqueues the inventory adjustment task on the same queue. The two messages are independent."
+        },
+        {
+          "from": "django",
+          "to": "browser",
+          "transport": "HTTP 201",
+          "payload": "{id: <uuid>}",
+          "note": "src=orders/views.py:24",
+          "narration": "The view returns 201 with the order id. The two tasks are queued but have not run yet."
+        }
+      ]
+    },
+    {
+      "id": "receipt-task",
+      "category": "internal",
+      "title": "Receipt task runs",
+      "name": "Receipt task runs",
+      "tagline": "Worker pops send_receipt → renders → POSTs to SMTP → writes receipt row.",
+      "color": "#0ea5e9",
+      "trigger": "worker",
+      "glossary_terms": ["Celery task", "Retry policy"],
+      "narration": "A Celery worker pops send_receipt, loads the order, posts the rendered email to the SMTP relay, and writes a Receipt row. SMTP errors trigger a retry up to three times.",
+      "steps": [
+        {
+          "from": "broker",
+          "to": "worker",
+          "transport": "AMQP deliver",
+          "payload": "Task envelope for orders.tasks.send_receipt with the order id.",
+          "note": "src=orders/tasks.py:18",
+          "narration": "The worker subscribes to the default queue. When a send_receipt message arrives, Celery hands it to the task body."
+        },
+        {
+          "from": "worker",
+          "to": "db",
+          "transport": "SQL",
+          "payload": "SELECT * FROM orders_order WHERE id=:id",
+          "note": "src=orders/tasks.py:18",
+          "narration": "send_receipt calls Order.objects.get to load the row. The query runs in the worker process's connection."
+        },
+        {
+          "from": "worker",
+          "to": "smtp",
+          "transport": "HTTP POST",
+          "payload": "POST {smtp_relay_url}/messages body: {to, subject, html}",
+          "note": "src=orders/tasks.py:18",
+          "narration": "The task POSTs the rendered HTML to the SMTP relay. A RelayError triggers Celery's retry path."
+        },
+        {
+          "from": "smtp",
+          "to": "worker",
+          "transport": "HTTP 202",
+          "payload": "{queued: true}",
+          "note": "src=orders/tasks.py:18",
+          "narration": "The relay acknowledges the post with 202; the task proceeds to write the receipt row."
+        },
+        {
+          "from": "worker",
+          "to": "db",
+          "transport": "SQL",
+          "payload": "INSERT INTO orders_receipt (order_id, sent_at) VALUES (:oid, now())",
+          "note": "src=orders/tasks.py:18",
+          "narration": "Receipt.objects.create writes the audit row, locking in the fact that the email was accepted by the relay."
+        }
+      ]
+    },
+    {
+      "id": "inventory-task",
+      "category": "internal",
+      "title": "Inventory reconciliation task runs",
+      "name": "Inventory reconciliation task runs",
+      "tagline": "Worker pops reconcile_inventory → writes a stock adjustment row.",
+      "color": "#a855f7",
+      "trigger": "worker",
+      "glossary_terms": ["Celery task"],
+      "narration": "A Celery worker pops reconcile_inventory, loads the order with its item, and writes a negative stock adjustment row marking the inventory change.",
+      "steps": [
+        {
+          "from": "broker",
+          "to": "worker",
+          "transport": "AMQP deliver",
+          "payload": "Task envelope for orders.tasks.reconcile_inventory with the order id.",
+          "note": "src=orders/tasks.py:44",
+          "narration": "The worker pops the inventory task message from the queue. The body executes in the worker process."
+        },
+        {
+          "from": "worker",
+          "to": "db",
+          "transport": "SQL",
+          "payload": "SELECT * FROM orders_order JOIN orders_item ON ... WHERE orders_order.id=:id",
+          "note": "src=orders/tasks.py:44",
+          "narration": "Order.objects.select_related('item').get loads the order and its item in a single join."
+        },
+        {
+          "from": "worker",
+          "to": "db",
+          "transport": "SQL",
+          "payload": "INSERT INTO orders_stockadjustment (item_id, delta, reason) VALUES (:iid, -:qty, 'order:<id>')",
+          "note": "src=orders/tasks.py:44",
+          "narration": "StockAdjustment.objects.create writes the negative delta row. Downstream readers can aggregate adjustments to compute on-hand stock."
+        }
+      ]
+    },
+    {
+      "id": "nightly-purge",
+      "category": "background",
+      "title": "Celery beat fires the nightly purge",
+      "name": "Celery beat fires the nightly purge",
+      "tagline": "Every day at 03:15 → enqueue nightly_purge → worker deletes 90-day-old cancelled orders.",
+      "color": "#f59e0b",
+      "trigger": "beat",
+      "glossary_terms": ["Celery beat", "Cron expression"],
+      "narration": "At 03:15 each day Celery beat consults CELERY_BEAT_SCHEDULE, enqueues nightly_purge on the default queue, and a worker pops it and deletes cancelled orders older than 90 days.",
+      "steps": [
+        {
+          "from": "beat",
+          "to": "broker",
+          "transport": "AMQP publish",
+          "payload": "nightly_purge message on the 'celery' default queue.",
+          "note": "src=orders_project/settings.py:88",
+          "narration": "The beat process compares wall-clock time against each entry. At 03:15 the nightly-purge entry fires and publishes the task message."
+        },
+        {
+          "from": "broker",
+          "to": "worker",
+          "transport": "AMQP deliver",
+          "payload": "Task envelope for orders.tasks.nightly_purge.",
+          "note": "src=orders/tasks.py:66",
+          "narration": "A worker subscribed to the default queue pops the message and dispatches the function."
+        },
+        {
+          "from": "worker",
+          "to": "db",
+          "transport": "SQL",
+          "payload": "DELETE FROM orders_order WHERE status='cancelled' AND created_at < now() - interval '90 days'",
+          "note": "src=orders/tasks.py:66",
+          "narration": "The task computes a cutoff 90 days back and runs the bulk delete. The number of rows removed is logged by Django's ORM."
+        }
+      ]
+    },
+    {
+      "id": "celery-boot",
+      "category": "build",
+      "title": "Celery app boots and discovers tasks",
+      "name": "Celery app boots and discovers tasks",
+      "tagline": "celery -A orders_project worker → Celery loads settings, autodiscovers, listens.",
+      "color": "#6366f1",
+      "trigger": "worker",
+      "glossary_terms": ["Autodiscovery"],
+      "narration": "On worker boot the Celery app loads Django settings under the CELERY_ namespace, autodiscovers tasks in every INSTALLED_APP, and connects to Redis to listen on the default queue.",
+      "steps": [
+        {
+          "from": "worker",
+          "to": "worker",
+          "transport": "in-process",
+          "payload": "Celery('orders_project'); app.config_from_object('django.conf:settings', namespace='CELERY')",
+          "note": "src=orders_project/celery.py:12",
+          "narration": "The Celery app is created and pulls every CELERY_* setting into its config. CELERY_BEAT_SCHEDULE comes in with it."
+        },
+        {
+          "from": "worker",
+          "to": "worker",
+          "transport": "in-process",
+          "payload": "app.autodiscover_tasks() walks orders/, orders_project/, etc.",
+          "note": "src=orders_project/celery.py:12",
+          "narration": "Celery scans each installed app for a tasks module and registers every @shared_task it finds."
+        },
+        {
+          "from": "worker",
+          "to": "broker",
+          "transport": "AMQP subscribe",
+          "payload": "BSUBSCRIBE celery (default queue).",
+          "note": "src=orders_project/celery.py:12",
+          "narration": "The worker opens its connection to Redis and subscribes to the default queue. Beat and Django publish into the same queue."
+        }
+      ]
+    }
+  ],
+  "glossary": {
+    "Celery task": "A function decorated with @shared_task that runs out-of-process via a worker.",
+    "Apply async": ".delay(...) or .apply_async(...); enqueues a task message on the broker without blocking the caller.",
+    "Retry policy": "Celery's built-in retry mechanism configured per task; the example uses max_retries=3, default_retry_delay=30.",
+    "Celery beat": "A scheduler that fires task messages on a configured cron schedule.",
+    "Cron expression": "A scheduling rule using hour/minute/day-of-week fields; here, hour=3 minute=15 means 03:15 every day.",
+    "Autodiscovery": "Celery's mechanism for finding @shared_task definitions across every INSTALLED_APP without explicit imports."
+  },
+  "actors": {
+    "browser": {"label": "Browser", "tech": "HTTP"},
+    "django": {"label": "Django app", "tech": "WSGI"},
+    "broker": {"label": "Redis broker", "tech": "Redis"},
+    "worker": {"label": "Celery worker", "tech": "Python"},
+    "db": {"label": "Postgres", "tech": "SQL"},
+    "smtp": {"label": "SMTP relay", "tech": "HTTP"},
+    "beat": {"label": "Celery beat", "tech": "scheduler"}
+  },
+  "categories": [
+    {"id": "user", "title": "User flow", "blurb": "Order form submission.", "mood": "default"},
+    {"id": "internal", "title": "Worker tasks", "blurb": "Receipt and inventory tasks fired by the view.", "mood": "default"},
+    {"id": "background", "title": "Scheduled jobs", "blurb": "Celery beat fires the nightly purge.", "mood": "night"},
+    {"id": "build", "title": "Boot", "blurb": "Celery app loads tasks and subscribes.", "mood": "build"}
+  ]
+}

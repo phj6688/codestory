@@ -1,0 +1,157 @@
+{
+  "project_name": "fastapi-starter",
+  "units": [
+    {
+      "id": "client",
+      "kind": "service",
+      "label": "Client",
+      "role": "External HTTP caller (curl, browser, or another service) posting orders."
+    },
+    {
+      "id": "app",
+      "kind": "service",
+      "label": "FastAPI app",
+      "role": "The application process; routes, dependencies, and the BackgroundTasks queue."
+    },
+    {
+      "id": "db",
+      "kind": "service",
+      "label": "Postgres",
+      "role": "Primary data store for the orders table and the schema migrations table."
+    },
+    {
+      "id": "mailer",
+      "kind": "service",
+      "label": "SMTP relay",
+      "role": "External mail relay that accepts receipt POSTs and delivers the email."
+    }
+  ],
+  "flows": [
+    {
+      "id": "create-order",
+      "category": "user",
+      "title": "Customer creates an order",
+      "name": "Customer creates an order",
+      "tagline": "POST /v1/orders → row inserted → receipt task enqueued.",
+      "color": "#10b981",
+      "trigger": "client",
+      "glossary_terms": ["Idempotency key", "Background task"],
+      "narration": "An external client POSTs an order to the FastAPI app, which inserts a row into Postgres and queues a background task before returning 201.",
+      "steps": [
+        {
+          "from": "client",
+          "to": "app",
+          "transport": "HTTP POST",
+          "payload": "POST /v1/orders body: {customer_id, amount_cents, currency}",
+          "note": "src=app/routes/orders.py:24",
+          "narration": "The client sends a POST with the order body. The FastAPI router matches /v1/orders and binds the request body to the OrderIn model."
+        },
+        {
+          "from": "app",
+          "to": "db",
+          "transport": "SQL",
+          "payload": "INSERT INTO orders (id, customer_id, amount_cents, currency, status, created_at) VALUES (...)",
+          "note": "src=app/routes/orders.py:48",
+          "narration": "The route calls _insert_order which executes a parameterised INSERT through the async session, then commits."
+        },
+        {
+          "from": "db",
+          "to": "app",
+          "transport": "SQL result",
+          "payload": "1 row inserted; commit acknowledged.",
+          "note": "src=app/routes/orders.py:48",
+          "narration": "Postgres acknowledges the commit. The route now holds the generated order id."
+        },
+        {
+          "from": "app",
+          "to": "client",
+          "transport": "HTTP 201",
+          "payload": "{id: <uuid>, status: 'created'}",
+          "note": "src=app/routes/orders.py:24",
+          "narration": "The route returns 201 with the order id. The receipt task is queued but has not run yet."
+        }
+      ]
+    },
+    {
+      "id": "receipt-task",
+      "category": "internal",
+      "title": "Background receipt task fires",
+      "name": "Background receipt task fires",
+      "tagline": "BackgroundTasks runs send_receipt() after the response is flushed.",
+      "color": "#0ea5e9",
+      "trigger": "app",
+      "glossary_terms": ["Background task"],
+      "narration": "After the 201 leaves the wire, FastAPI's BackgroundTasks runner pops send_receipt, the function loads the order, renders the email, and POSTs it to the SMTP relay.",
+      "steps": [
+        {
+          "from": "app",
+          "to": "db",
+          "transport": "SQL",
+          "payload": "SELECT id, email, amount_cents, currency, created_at FROM orders WHERE id=:id",
+          "note": "src=app/tasks/receipts.py:18",
+          "narration": "send_receipt loads the order row by id so the template has every field it needs."
+        },
+        {
+          "from": "app",
+          "to": "mailer",
+          "transport": "HTTP POST",
+          "payload": "POST {smtp_relay_url}/v1/messages Authorization=Bearer <token> body: {to, subject, html}",
+          "note": "src=app/tasks/receipts.py:18",
+          "narration": "The task POSTs the rendered HTML to the SMTP relay with a 8-second timeout."
+        },
+        {
+          "from": "mailer",
+          "to": "app",
+          "transport": "HTTP 202",
+          "payload": "{queued: true, message_id: <id>}",
+          "note": "src=app/tasks/receipts.py:18",
+          "narration": "The relay accepts the request and acknowledges with 202. Delivery happens asynchronously on the relay's side."
+        }
+      ]
+    },
+    {
+      "id": "startup-migration",
+      "category": "build",
+      "title": "App start applies migrations",
+      "name": "App start applies migrations",
+      "tagline": "FastAPI startup event runs Alembic upgrade head before serving traffic.",
+      "color": "#a855f7",
+      "trigger": "app",
+      "glossary_terms": [],
+      "narration": "On boot, the FastAPI startup event runs apply_migrations() which calls alembic upgrade head against the Postgres URL. The app stays out of the gateway until the migration succeeds.",
+      "steps": [
+        {
+          "from": "app",
+          "to": "db",
+          "transport": "SQL",
+          "payload": "alembic upgrade head (CREATE TABLE IF NOT EXISTS orders, ALTER TABLE ... etc).",
+          "note": "src=app/main.py:32",
+          "narration": "The startup event awaits apply_migrations. Inside, Alembic walks the versions folder and applies any unapplied revision against the live database."
+        },
+        {
+          "from": "db",
+          "to": "app",
+          "transport": "SQL result",
+          "payload": "alembic_version row at the head revision.",
+          "note": "src=app/db/migrations.py:14",
+          "narration": "When the head revision matches the database, apply_migrations returns. The startup hook completes and the app begins accepting traffic."
+        }
+      ]
+    }
+  ],
+  "glossary": {
+    "Idempotency key": "A client-supplied token that lets the server detect and reject duplicate requests.",
+    "Background task": "A FastAPI feature that runs a coroutine after the response is flushed but inside the same process."
+  },
+  "actors": {
+    "client": {"label": "Client", "tech": "HTTP"},
+    "app": {"label": "FastAPI app", "tech": "uvicorn"},
+    "db": {"label": "Postgres", "tech": "SQL"},
+    "mailer": {"label": "SMTP relay", "tech": "HTTP"}
+  },
+  "categories": [
+    {"id": "user", "title": "When a customer orders", "blurb": "The single user-facing flow.", "mood": "default"},
+    {"id": "internal", "title": "Background work", "blurb": "Receipt task triggered after the response.", "mood": "default"},
+    {"id": "build", "title": "Boot", "blurb": "Migrations applied on startup.", "mood": "build"}
+  ]
+}
