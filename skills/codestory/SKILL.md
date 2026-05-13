@@ -284,9 +284,33 @@ This is the R9 mitigation. The budget is enforced by three explicit per-pass cap
 
 - Read the entire codebase. Greedy reads are the failure mode.
 - Read test files unless the only entrypoint signal lives in one (rare).
-- Read vendor directories: `node_modules/`, `.venv/`, `site-packages/`, `dist/`, `build/`.
+- Read vendor and build directories: `node_modules/`, `.venv/`, `venv/`, `site-packages/`, `dist/`, `build/`, `.next/`, `target/`.
+- Read backup, swap, and old-revision files: `*.bak`, `*.backup`, `*.orig`, `*~`, `*.swp`, `*.old`, `*.pre-*`, anything matching `*-pre-*` or `*.pre[-.]*`.
 - Read binary files.
 - Read files outside the working directory.
+- Read inside `.git/`, `.hg/`, `.svn/` plumbing. Use the user-visible README and code instead.
+
+### Never read — credentials, secrets, tokens (HARD RULE)
+
+The skill MUST skip any file whose path or name matches the patterns below. A matched file is not opened, not partially read, not counted against the budget. If such a file would be referenced by a step, the step records `note: "credentials at <path> — not read by discovery"` and continues. This is a hard rule, not a guideline; matched paths are off-limits regardless of context.
+
+Directories (anywhere in path):
+- `auths/`, `auth/` when it contains `*.json` or `*.token`
+- `secrets/`, `secret/`
+- `credentials/`, `credential/`
+- `.aws/`, `.ssh/`, `.gnupg/`, `.netrc`
+- `~/.config/<vendor>/auth*` style caches
+
+Files (any depth, case-insensitive on the filename):
+- `.env`, `.env.*`, `*.env.local`
+- Any filename containing `credential`, `secret`, `password`, `passwd`
+- Any filename containing `token` UNLESS the path explicitly contains a non-credential context such as `tokenizer/`, `tokens/test`, `lexer/`, or the file is a `.md` doc; when ambiguous, skip
+- Any filename containing `apikey`, `api_key`, `api-key`, `private_key`, `private-key`
+- `*.key`, `*.pem`, `*.pfx`, `*.p12`, `*.crt`, `*.cer`
+- `id_rsa`, `id_rsa.*`, `id_ed25519`, `id_ed25519.*`, `*_rsa`, `*_ed25519`
+- Any file whose first 1 KB matches `BEGIN (RSA|OPENSSH|EC|DSA|ENCRYPTED) PRIVATE KEY` or `aws_secret_access_key` or `client_secret` — treat the partial read as a poison-pill: stop, do not include the path in any output, log the skip
+
+When a directory listing shows a matched path, surface ONE line in the user-visible discovery summary: "skipped credential paths: <count> files under <top-level dir>". Never enumerate matched paths in flows.json, narrations, or notes.
 
 ---
 
