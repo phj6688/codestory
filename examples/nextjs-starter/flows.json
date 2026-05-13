@@ -1,0 +1,183 @@
+{
+  "project_name": "nextjs-starter",
+  "units": [
+    {
+      "id": "browser",
+      "kind": "service",
+      "label": "Browser",
+      "role": "End user's browser; requests pages and submits form posts."
+    },
+    {
+      "id": "next",
+      "kind": "service",
+      "label": "Next.js server",
+      "role": "Next.js 15 App Router process: page server-components and /api route handlers."
+    },
+    {
+      "id": "db",
+      "kind": "service",
+      "label": "Postgres",
+      "role": "Primary store for the orders table; queried directly via postgres-js tagged templates."
+    },
+    {
+      "id": "stripe",
+      "kind": "service",
+      "label": "Stripe",
+      "role": "External payment processor that POSTs signed webhook events to /api/webhooks/stripe."
+    }
+  ],
+  "flows": [
+    {
+      "id": "view-orders",
+      "category": "user",
+      "title": "User opens the orders page",
+      "name": "User opens the orders page",
+      "tagline": "GET /orders → server component SELECTs and renders the HTML.",
+      "color": "#10b981",
+      "trigger": "browser",
+      "glossary_terms": ["Server component"],
+      "narration": "The user requests /orders. The server component reads the 50 most recent rows from Postgres, renders the HTML on the server, and returns the streamed response.",
+      "steps": [
+        {
+          "from": "browser",
+          "to": "next",
+          "transport": "HTTP GET",
+          "payload": "GET /orders Accept=text/html",
+          "note": "src=app/orders/page.tsx:12",
+          "narration": "The browser requests /orders. Next routes the request into the OrdersPage server component."
+        },
+        {
+          "from": "next",
+          "to": "db",
+          "transport": "SQL",
+          "payload": "SELECT id, customer_id, amount_cents, currency, created_at FROM orders ORDER BY created_at DESC LIMIT 50",
+          "note": "src=app/orders/page.tsx:12",
+          "narration": "The server component awaits the tagged-template query inside its body. The page does not return until the rows are in memory."
+        },
+        {
+          "from": "db",
+          "to": "next",
+          "transport": "SQL rows",
+          "payload": "Up to 50 row records.",
+          "note": "src=app/orders/page.tsx:12",
+          "narration": "Postgres returns the matching rows. The component continues, mapping each row through OrderList."
+        },
+        {
+          "from": "next",
+          "to": "browser",
+          "transport": "HTTP 200",
+          "payload": "Streaming HTML response with the rendered orders table.",
+          "note": "src=app/orders/page.tsx:12",
+          "narration": "Next streams the rendered HTML back. The browser parses it and paints the orders table."
+        }
+      ]
+    },
+    {
+      "id": "create-order-api",
+      "category": "user",
+      "title": "Client POSTs a new order",
+      "name": "Client POSTs a new order",
+      "tagline": "POST /api/orders → row inserted → 201 with the new id.",
+      "color": "#0ea5e9",
+      "trigger": "browser",
+      "glossary_terms": ["API route", "Zod"],
+      "narration": "A client POSTs a JSON body to /api/orders. The route validates with Zod, inserts a row, and returns 201 with the generated id.",
+      "steps": [
+        {
+          "from": "browser",
+          "to": "next",
+          "transport": "HTTP POST",
+          "payload": "POST /api/orders Content-Type=application/json body: {customerId, amountCents, currency}",
+          "note": "src=app/api/orders/route.ts:18",
+          "narration": "The form posts JSON to /api/orders. The handler parses and validates against the OrderCreate schema."
+        },
+        {
+          "from": "next",
+          "to": "db",
+          "transport": "SQL",
+          "payload": "INSERT INTO orders (customer_id, amount_cents, currency, status) VALUES (...) RETURNING id",
+          "note": "src=app/api/orders/route.ts:18",
+          "narration": "The route runs the INSERT and reads back the new id via RETURNING."
+        },
+        {
+          "from": "db",
+          "to": "next",
+          "transport": "SQL result",
+          "payload": "Row with the new id.",
+          "note": "src=app/api/orders/route.ts:18",
+          "narration": "Postgres returns the inserted row. The route uses only the id field."
+        },
+        {
+          "from": "next",
+          "to": "browser",
+          "transport": "HTTP 201",
+          "payload": "{id: <uuid>}",
+          "note": "src=app/api/orders/route.ts:18",
+          "narration": "The route serialises the id into JSON and returns 201."
+        }
+      ]
+    },
+    {
+      "id": "stripe-webhook",
+      "category": "internal",
+      "title": "Stripe webhook fires",
+      "name": "Stripe webhook fires",
+      "tagline": "Stripe POSTs an event; the route verifies the signature and updates the order.",
+      "color": "#a855f7",
+      "trigger": "stripe",
+      "glossary_terms": ["Webhook", "Signature verification"],
+      "narration": "Stripe POSTs a signed event to /api/webhooks/stripe. The route verifies the stripe-signature header against the webhook secret and updates the matching order row when the event is payment_intent.succeeded.",
+      "steps": [
+        {
+          "from": "stripe",
+          "to": "next",
+          "transport": "HTTP POST",
+          "payload": "POST /api/webhooks/stripe header stripe-signature=<sig> body: raw event JSON",
+          "note": "src=app/api/webhooks/stripe/route.ts:14",
+          "narration": "Stripe sends the event with the stripe-signature header set. Next pipes the raw body in so the signature check sees the exact bytes Stripe signed."
+        },
+        {
+          "from": "next",
+          "to": "next",
+          "transport": "in-process",
+          "payload": "stripe.webhooks.constructEvent(raw, signature, STRIPE_WEBHOOK_SECRET) → Event or 400.",
+          "note": "src=app/api/webhooks/stripe/route.ts:14",
+          "narration": "The route calls constructEvent to verify the signature. A bad signature returns 400 immediately without touching the database."
+        },
+        {
+          "from": "next",
+          "to": "db",
+          "transport": "SQL",
+          "payload": "UPDATE orders SET status = 'paid' WHERE stripe_pi_id = <pi.id>",
+          "note": "src=app/api/webhooks/stripe/route.ts:14",
+          "narration": "For payment_intent.succeeded events the route runs an UPDATE on the matching order row."
+        },
+        {
+          "from": "next",
+          "to": "stripe",
+          "transport": "HTTP 200",
+          "payload": "{received: true}",
+          "note": "src=app/api/webhooks/stripe/route.ts:14",
+          "narration": "The route returns 200 with a small JSON body so Stripe records the event as delivered."
+        }
+      ]
+    }
+  ],
+  "glossary": {
+    "Server component": "A Next.js 15 component that executes on the server and renders to HTML; it can await database calls inside its body.",
+    "API route": "A route handler under app/api that returns JSON; runs server-side per request.",
+    "Webhook": "An inbound HTTP POST from an external system carrying an event payload.",
+    "Signature verification": "Comparing an HMAC of the raw request body against a header value to confirm the sender and rule out tampering.",
+    "Zod": "A TypeScript schema library used here to parse incoming JSON bodies before they touch the database."
+  },
+  "actors": {
+    "browser": {"label": "Browser", "tech": "HTTP"},
+    "next": {"label": "Next.js server", "tech": "Node.js"},
+    "db": {"label": "Postgres", "tech": "SQL"},
+    "stripe": {"label": "Stripe", "tech": "webhook source"}
+  },
+  "categories": [
+    {"id": "user", "title": "What the user sees", "blurb": "Page render and the API write.", "mood": "default"},
+    {"id": "internal", "title": "Webhook traffic", "blurb": "Signed events from Stripe.", "mood": "default"}
+  ]
+}

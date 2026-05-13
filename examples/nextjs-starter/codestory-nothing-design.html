@@ -1,0 +1,1600 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>codestory</title>
+<style id="codestory-variables">
+  :root {
+    /* default values = cococream theme. theme CSS files override these. */
+    --bg: #f5ead2;
+    --bg-2: #ede0bf;
+    --panel: #faf3e0;
+    --panel-2: #f2e6c8;
+    --line: #cdb98a;
+    --ink: #1a140f;
+    --mute: #6b5a44;
+    --dim: #b4a47d;
+    --accent: #d9462b;
+    --accent-2: #b53619;
+    --accent-soft: rgba(217, 70, 43, 0.12);
+    --warn: #b8651a;
+    --packet: #1a140f;
+    --paper-dot: rgba(120, 95, 60, 0.18);
+    --font-serif: "Iowan Old Style", "Source Serif Pro", Charter, Georgia, "Times New Roman", serif;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", system-ui, sans-serif;
+    --font-mono: ui-monospace, "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+    --card-radius: 8px;
+    --shadow-offset: 4px;
+    --bg-pattern: radial-gradient(circle, var(--paper-dot) 1px, transparent 1px) 0 0 / 22px 22px;
+  }
+</style>
+<style id="codestory-structure">
+  /* structural CSS — themes MUST NOT override layout/geometry */
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100vh;
+    background: var(--bg-pattern), var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    overflow: hidden;
+  }
+  .app {
+    display: flex; flex-direction: column;
+    height: 100vh;
+  }
+  header {
+    padding: 14px 28px;
+    display: flex; align-items: baseline; gap: 16px;
+    border-bottom: 1px solid var(--line);
+    flex-shrink: 0;
+    z-index: 5;
+    background: var(--panel);
+  }
+  header h1 {
+    margin: 0; font-size: 20px;
+    color: var(--ink);
+    font-weight: 700;
+    font-family: var(--font-serif);
+    letter-spacing: -0.3px;
+  }
+  header h1 em { color: var(--accent); font-style: italic; font-weight: 700; }
+  header .crumb {
+    color: var(--mute); font-size: 12px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+  }
+  header .crumb:hover { color: var(--accent); }
+  header .crumb::before { content: "/ "; }
+  header .spacer { flex: 1; }
+  header .hint {
+    color: var(--mute); font-size: 11px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.5px;
+  }
+
+  .stage {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* HOME */
+  .view { display: none; position: absolute; inset: 0; }
+  .view.active { display: block; }
+
+  .home, .chapter-list {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: 28px;
+    overflow-y: auto;
+  }
+  .home-inner, .chapter-inner { max-width: 1000px; width: 100%; }
+  .home .lead {
+    color: var(--ink);
+    margin: 0 0 32px;
+    font-size: 22px;
+    max-width: 720px;
+    line-height: 1.45;
+    font-family: var(--font-serif);
+    font-weight: 400;
+  }
+  .home .lead em { color: var(--accent); font-style: italic; }
+  .home .lead b { color: var(--ink); font-weight: 700; }
+
+  .cats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+  }
+  .cat {
+    border: 1px solid var(--line);
+    border-radius: var(--card-radius);
+    padding: 22px;
+    background: radial-gradient(circle, var(--paper-dot) 1px, transparent 1px) 0 0 / 14px 14px, var(--panel);
+    cursor: pointer;
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+  }
+  .cat:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent);
+    box-shadow: 0 4px 18px var(--accent-soft);
+  }
+  .cat .chap { font-size: 10px; color: var(--mute); letter-spacing: 2px; text-transform: uppercase; font-family: var(--font-mono); }
+  .cat .num {
+    font-size: 28px; color: var(--accent); font-weight: 700; margin-top: 4px;
+    font-family: var(--font-serif); font-style: italic;
+  }
+  .cat .title {
+    margin-top: 6px; font-size: 18px; color: var(--ink);
+    font-family: var(--font-serif); font-weight: 600;
+    line-height: 1.25;
+  }
+  .cat .blurb { margin-top: 12px; color: var(--mute); font-size: 13px; line-height: 1.55; }
+  .cat .count { margin-top: 14px; color: var(--accent); font-size: 11px; font-family: var(--font-mono); letter-spacing: 0.5px; }
+
+  /* CHAPTER LIST */
+  .chapter-inner h2 {
+    margin: 0 0 6px;
+    font-size: 36px;
+    color: var(--ink);
+    font-weight: 700;
+    font-family: var(--font-serif);
+    letter-spacing: -0.5px;
+    line-height: 1.1;
+  }
+  .chapter-inner h2 em { color: var(--accent); font-style: italic; }
+  .chapter-inner .chap-sub {
+    color: var(--mute);
+    font-size: 15px;
+    margin-bottom: 30px;
+    line-height: 1.6;
+    max-width: 640px;
+  }
+  .stories {
+    display: flex; flex-direction: column;
+    gap: 10px;
+  }
+  .story-card {
+    display: flex; align-items: center; gap: 18px;
+    padding: 18px 22px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 5px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+  }
+  .story-card:hover {
+    background: var(--panel-2);
+    transform: translateX(4px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+  .story-card .dot {
+    width: 14px; height: 14px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .story-card .body { flex: 1; min-width: 0; }
+  .story-card .title {
+    font-size: 17px; color: var(--ink); font-weight: 600;
+    font-family: var(--font-serif);
+  }
+  .story-card .tagline { font-size: 13px; color: var(--mute); line-height: 1.55; margin-top: 4px; }
+  .story-card .meta { font-size: 11px; color: var(--dim); margin-top: 8px; font-family: var(--font-mono); }
+  .story-card .meta .tag { color: var(--accent); margin-right: 10px; }
+  .story-card .play {
+    flex-shrink: 0; color: var(--accent); font-size: 12px;
+    font-family: var(--font-mono); letter-spacing: 0.5px;
+    padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--panel-2);
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .story-card:hover .play { background: var(--accent); color: var(--panel); border-color: var(--accent); }
+
+  /* STORY PLAYER */
+  .player {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    background: var(--bg-pattern), var(--bg);
+  }
+
+  .player-top {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 28px 10px;
+    flex-shrink: 0;
+  }
+  .progress-dots {
+    flex: 1;
+    display: flex; gap: 5px;
+  }
+  .progress-dots .pd {
+    flex: 1;
+    height: 4px;
+    background: var(--line);
+    border-radius: 2px;
+    overflow: hidden;
+    position: relative;
+  }
+  .progress-dots .pd .fill {
+    position: absolute; inset: 0;
+    background: var(--accent);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+  .progress-dots .pd.done .fill { transform: translateX(0); }
+  .progress-dots .pd.current .fill { transition: transform linear; }
+  .player-top .ctrl-btn {
+    background: var(--panel);
+    color: var(--mute);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    cursor: pointer;
+    letter-spacing: 0.4px;
+    transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+  }
+  .player-top .ctrl-btn:hover {
+    color: var(--panel); border-color: var(--accent);
+    background: var(--accent);
+  }
+  .player-top .scene-count {
+    color: var(--mute); font-size: 11px; min-width: 56px; text-align: right;
+    font-family: var(--font-mono);
+  }
+
+  .scene-area {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+  }
+  .scene-svg {
+    width: 100%; height: 100%;
+    display: block;
+  }
+
+  .caption {
+    flex-shrink: 0;
+    padding: 22px 32px 28px;
+    text-align: center;
+    min-height: 100px;
+  }
+  .caption .step-label {
+    color: var(--accent);
+    font-size: 11px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    font-family: var(--font-mono);
+  }
+  .caption .narration {
+    color: var(--ink);
+    font-size: 20px;
+    line-height: 1.55;
+    max-width: 860px;
+    margin: 0 auto;
+    font-family: var(--font-serif);
+    font-weight: 400;
+  }
+  .caption .narration .who {
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 16px;
+    font-weight: 500;
+    padding: 1px 7px;
+    background: var(--accent-soft);
+    border-radius: 4px;
+    font-style: normal;
+  }
+  .caption .narration .what {
+    color: var(--mute);
+    font-family: var(--font-mono);
+    font-size: 16px;
+    font-style: normal;
+  }
+
+  /* SVG actor styles */
+  .actor-card { fill: var(--panel); stroke: var(--ink); stroke-width: 2; }
+  .actor-name { fill: var(--ink); font-size: 17px; font-weight: 700; text-anchor: middle; font-family: var(--font-serif); }
+  .actor-tech { fill: var(--mute); font-size: 11px; text-anchor: middle; font-family: var(--font-mono); }
+  .actor-ring { fill: none; stroke-width: 2; opacity: 0; }
+  .arc { fill: none; stroke-width: 2; stroke-dasharray: 5 5; opacity: 0.55; }
+  .packet-shape { filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.35)); }
+  .speech-bubble { fill: var(--panel-2); stroke-width: 1.5; }
+  .speech-text { fill: var(--ink); font-size: 12px; font-family: var(--font-mono); }
+  .transport-pill-bg { fill: var(--panel); stroke-width: 1.5; }
+  .transport-pill-text { font-size: 11px; font-family: var(--font-mono); text-anchor: middle; font-weight: 600; }
+
+  /* intro / outro */
+  .title-card { fill: var(--panel); stroke-width: 1.5; }
+  .title-chapter { fill: var(--mute); font-size: 11px; letter-spacing: 3px; text-anchor: middle; font-family: var(--font-mono); }
+  .title-name { font-size: 44px; font-weight: 700; text-anchor: middle; font-family: var(--font-serif); font-style: italic; }
+  .title-tag { fill: var(--ink); font-size: 16px; text-anchor: middle; font-family: var(--font-serif); }
+  .title-cta { fill: var(--mute); font-size: 11px; letter-spacing: 1.5px; text-anchor: middle; font-family: var(--font-mono); }
+
+  /* SHORTCUTS PANEL */
+  .shortcuts {
+    position: absolute;
+    right: 22px;
+    bottom: 22px;
+    z-index: 10;
+    background: var(--panel);
+    border: 1px solid var(--ink);
+    border-radius: 6px;
+    padding: 14px 18px 12px;
+    font-size: 12px;
+    min-width: 240px;
+    box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--ink);
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+    transition: opacity 0.5s ease, transform 0.5s ease;
+    pointer-events: none;
+  }
+  .shortcuts.show {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+  .shortcuts-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .shortcuts h4 {
+    margin: 0;
+    font-size: 10px;
+    color: var(--ink);
+    letter-spacing: 1.8px;
+    text-transform: uppercase;
+    font-weight: 700;
+    font-family: var(--font-mono);
+  }
+  .shortcuts .close {
+    background: transparent;
+    border: none;
+    color: var(--mute);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 0;
+    line-height: 1;
+  }
+  .shortcuts .close:hover { color: var(--accent); }
+  .shortcuts .row {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 8px;
+  }
+  .shortcuts .row:last-child { margin-bottom: 0; }
+  .shortcuts .keys { display: flex; gap: 4px; min-width: 72px; }
+  .kbd {
+    display: inline-flex;
+    align-items: center; justify-content: center;
+    min-width: 30px; height: 26px;
+    padding: 0 9px;
+    background: var(--panel-2);
+    border: 1px solid var(--ink);
+    border-bottom-width: 3px;
+    border-radius: 5px;
+    font-size: 11px;
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    transition: transform 0.1s ease, border-color 0.1s ease, color 0.1s ease, background 0.1s ease;
+  }
+  .kbd.pressed {
+    transform: translateY(2px);
+    border-bottom-width: 1px;
+    background: var(--accent);
+    color: var(--panel);
+    border-color: var(--accent-2);
+  }
+  .shortcuts .lbl {
+    color: var(--mute); font-size: 12px;
+    font-family: var(--font-serif);
+  }
+
+  /* GLOSSARY PANEL */
+  .glossary {
+    position: absolute;
+    left: 22px;
+    bottom: 22px;
+    z-index: 10;
+    width: 400px;
+    max-width: calc(100vw - 44px);
+    max-height: 60vh;
+    background: var(--panel);
+    border: 1px solid var(--ink);
+    border-radius: 6px;
+    display: flex; flex-direction: column;
+    box-shadow: calc(-1 * var(--shadow-offset)) var(--shadow-offset) 0 var(--ink);
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+    transition: opacity 0.5s ease, transform 0.5s ease;
+    pointer-events: none;
+  }
+  .glossary.show {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+  .glossary-head {
+    padding: 14px 18px 12px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+    flex-shrink: 0;
+  }
+  .glossary h4 {
+    margin: 0;
+    font-size: 10px;
+    color: var(--ink);
+    letter-spacing: 1.8px;
+    text-transform: uppercase;
+    font-weight: 700;
+    font-family: var(--font-mono);
+  }
+  .glossary h4 .for {
+    color: var(--accent);
+    font-size: 14px;
+    letter-spacing: 0;
+    text-transform: none;
+    margin-left: 8px;
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-weight: 600;
+  }
+  .glossary .close {
+    background: transparent;
+    border: none;
+    color: var(--mute);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 0;
+    line-height: 1;
+  }
+  .glossary .close:hover { color: var(--accent); }
+  .glossary-body {
+    padding: 16px 20px 20px;
+    overflow-y: auto;
+  }
+  .gl-term { margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px dashed var(--line); }
+  .gl-term:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+  .gl-term .name {
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    margin-bottom: 5px;
+    font-weight: 700;
+  }
+  .gl-term .def {
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.55;
+    font-family: var(--font-serif);
+  }
+  .gl-empty { color: var(--mute); font-size: 13px; font-family: var(--font-serif); font-style: italic; }
+
+  /* HELP BUTTON */
+  .help-btn {
+    background: var(--panel);
+    color: var(--ink);
+    border: 1px solid var(--ink);
+    border-radius: 50%;
+    width: 26px; height: 26px;
+    cursor: pointer;
+    font-family: var(--font-serif);
+    font-size: 13px;
+    line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0;
+    font-style: italic;
+    font-weight: 600;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .help-btn:hover { color: var(--panel); background: var(--accent); border-color: var(--accent); }
+  .help-btn.attention { animation: helpPulse 1.4s ease-in-out 2; }
+  @keyframes helpPulse {
+    0%, 100% { box-shadow: 0 0 0 0 transparent; }
+    50% { box-shadow: 0 0 0 6px var(--accent-soft); }
+  }
+</style>
+<style id="codestory-theme">
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Space+Mono&display=swap');
+/*
+ * codestory · theme: nothing-design
+ *
+ * strict compliance with ~/.claude/skills/nothing-design/SKILL.md:
+ *   - OLED black bg, monochrome canvas
+ *   - red used only as interrupt accent
+ *   - three-layer hierarchy (display / primary / tertiary)
+ *   - no shadows
+ *   - Space Grotesk for headings/body, Space Mono for labels/code
+ *
+ * scar R3: every type-family chain declares system fallbacks so offline render
+ * keeps Nothing's typographic rules intact. Google Fonts @import is the
+ * ONE documented external dependency for this theme.
+ *
+ * variable overrides + type-family overrides only — no layout-modifying CSS.
+ * see TASKSPEC §5 and AUDIT.md scar R3 / R6.
+ */
+
+:root {
+  --bg: #000000;
+  --bg-2: #0a0a0a;
+  --panel: #0a0a0a;
+  --panel-2: #141414;
+  --line: #2a2a2a;
+  --ink: #ffffff;
+  --mute: rgba(255, 255, 255, 0.6);
+  --dim: rgba(255, 255, 255, 0.4);
+  --accent: #ffffff;
+  --accent-2: rgba(255, 255, 255, 0.9);
+  --accent-soft: rgba(255, 255, 255, 0.08);
+  --warn: #D71921;
+  --packet: #ffffff;
+  --paper-dot: rgba(255, 255, 255, 0);
+  --font-serif: 'Space Grotesk', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: 'Space Grotesk', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Space Mono', 'JetBrains Mono', ui-monospace, monospace;
+  --card-radius: 4px;
+  --shadow-offset: 0px;
+  --bg-pattern: none;
+}
+
+/* no shadows anywhere — Nothing anti-pattern */
+.cat,
+.story-card,
+.shortcuts,
+.glossary,
+.help-btn.attention {
+  box-shadow: none;
+}
+
+.cat:hover,
+.story-card:hover {
+  box-shadow: none;
+}
+
+/* tertiary layer: Space Mono ALL CAPS for labels */
+.cat .chap,
+.story-card .meta,
+.caption .step-label,
+.shortcuts h4,
+.glossary h4 {
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-family: 'Space Mono', 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* primary heading weight: Space Grotesk medium, not italic */
+.cat .num,
+.chapter-inner h2 em,
+.title-name {
+  font-style: normal;
+  font-weight: 500;
+  font-family: 'Space Grotesk', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1><span id="project-name">codestory</span> <em>stories</em></h1>
+    <span class="crumb" id="crumb-home">home</span>
+    <span class="crumb" id="crumb-cat" style="display:none"></span>
+    <span class="crumb" id="crumb-flow" style="display:none"></span>
+    <span class="spacer"></span>
+    <span class="hint" id="hint"></span>
+  </header>
+
+  <div class="stage">
+
+    <div class="view active" id="v-home">
+      <div class="home">
+        <div class="home-inner">
+          <p class="lead" id="lead-text">
+            Pick a chapter &mdash; each one is a collection of <em>short, animated stories</em>
+            showing exactly what happens when something runs.
+          </p>
+          <div class="cats" id="cats"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="view" id="v-chapter">
+      <div class="chapter-list">
+        <div class="chapter-inner" id="chapter-inner"></div>
+      </div>
+    </div>
+
+    <div class="view" id="v-player">
+      <div class="player" id="player-root">
+        <div class="player-top">
+          <div class="progress-dots" id="dots"></div>
+          <span class="scene-count" id="scene-count">1 / 1</span>
+          <button class="ctrl-btn" id="btn-mode" title="overview / scenes (O)">overview</button>
+          <button class="ctrl-btn" id="btn-replay" title="restart (R)">replay</button>
+          <button class="ctrl-btn" id="btn-pause" title="pause/play (space)">pause</button>
+          <button class="ctrl-btn" id="btn-exit" title="back (esc)">esc</button>
+          <button class="help-btn" id="btn-info" title="glossary (i)">i</button>
+          <button class="help-btn" id="btn-help" title="keyboard shortcuts (?)">?</button>
+        </div>
+        <div class="scene-area">
+          <svg class="scene-svg" id="scene" viewBox="0 0 1200 600" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <radialGradient id="packetGlow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.9"/>
+                <stop offset="60%" stop-color="var(--accent)" stop-opacity="0.4"/>
+                <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+              </radialGradient>
+            </defs>
+            <g id="scene-content"></g>
+          </svg>
+        </div>
+        <div class="caption">
+          <div class="step-label" id="step-label">&nbsp;</div>
+          <div class="narration" id="narration">&nbsp;</div>
+        </div>
+
+        <div class="shortcuts" id="shortcuts">
+          <div class="shortcuts-head">
+            <h4>Keyboard</h4>
+            <button class="close" id="shortcuts-close" title="dismiss">&times;</button>
+          </div>
+          <div class="row">
+            <div class="keys"><span class="kbd" data-k="space">Space</span></div>
+            <span class="lbl">play / pause</span>
+          </div>
+          <div class="row">
+            <div class="keys">
+              <span class="kbd" data-k="left">&larr;</span>
+              <span class="kbd" data-k="right">&rarr;</span>
+            </div>
+            <span class="lbl">prev / next scene</span>
+          </div>
+          <div class="row">
+            <div class="keys"><span class="kbd" data-k="r">R</span></div>
+            <span class="lbl">replay from start</span>
+          </div>
+          <div class="row">
+            <div class="keys"><span class="kbd" data-k="o">O</span></div>
+            <span class="lbl">overview / scenes</span>
+          </div>
+          <div class="row">
+            <div class="keys"><span class="kbd" data-k="i">I</span></div>
+            <span class="lbl">glossary for this story</span>
+          </div>
+          <div class="row">
+            <div class="keys"><span class="kbd" data-k="esc">Esc</span></div>
+            <span class="lbl">back to stories</span>
+          </div>
+        </div>
+
+        <div class="glossary" id="glossary">
+          <div class="glossary-head">
+            <h4>Glossary <span class="for" id="glossary-flow-name"></span></h4>
+            <button class="close" id="glossary-close" title="dismiss">&times;</button>
+          </div>
+          <div class="glossary-body" id="glossary-body"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script id="codestory-data" type="application/json">{"project_name":"nextjs-starter","units":[{"id":"browser","kind":"service","label":"Browser","role":"End user's browser; requests pages and submits form posts."},{"id":"next","kind":"service","label":"Next.js server","role":"Next.js 15 App Router process: page server-components and /api route handlers."},{"id":"db","kind":"service","label":"Postgres","role":"Primary store for the orders table; queried directly via postgres-js tagged templates."},{"id":"stripe","kind":"service","label":"Stripe","role":"External payment processor that POSTs signed webhook events to /api/webhooks/stripe."}],"flows":[{"id":"view-orders","category":"user","title":"User opens the orders page","name":"User opens the orders page","tagline":"GET /orders → server component SELECTs and renders the HTML.","color":"#10b981","trigger":"browser","glossary_terms":["Server component"],"narration":"The user requests /orders. The server component reads the 50 most recent rows from Postgres, renders the HTML on the server, and returns the streamed response.","steps":[{"from":"browser","to":"next","transport":"HTTP GET","payload":"GET /orders Accept=text/html","note":"src=app/orders/page.tsx:12","narration":"The browser requests /orders. Next routes the request into the OrdersPage server component."},{"from":"next","to":"db","transport":"SQL","payload":"SELECT id, customer_id, amount_cents, currency, created_at FROM orders ORDER BY created_at DESC LIMIT 50","note":"src=app/orders/page.tsx:12","narration":"The server component awaits the tagged-template query inside its body. The page does not return until the rows are in memory."},{"from":"db","to":"next","transport":"SQL rows","payload":"Up to 50 row records.","note":"src=app/orders/page.tsx:12","narration":"Postgres returns the matching rows. The component continues, mapping each row through OrderList."},{"from":"next","to":"browser","transport":"HTTP 200","payload":"Streaming HTML response with the rendered orders table.","note":"src=app/orders/page.tsx:12","narration":"Next streams the rendered HTML back. The browser parses it and paints the orders table."}]},{"id":"create-order-api","category":"user","title":"Client POSTs a new order","name":"Client POSTs a new order","tagline":"POST /api/orders → row inserted → 201 with the new id.","color":"#0ea5e9","trigger":"browser","glossary_terms":["API route","Zod"],"narration":"A client POSTs a JSON body to /api/orders. The route validates with Zod, inserts a row, and returns 201 with the generated id.","steps":[{"from":"browser","to":"next","transport":"HTTP POST","payload":"POST /api/orders Content-Type=application/json body: {customerId, amountCents, currency}","note":"src=app/api/orders/route.ts:18","narration":"The form posts JSON to /api/orders. The handler parses and validates against the OrderCreate schema."},{"from":"next","to":"db","transport":"SQL","payload":"INSERT INTO orders (customer_id, amount_cents, currency, status) VALUES (...) RETURNING id","note":"src=app/api/orders/route.ts:18","narration":"The route runs the INSERT and reads back the new id via RETURNING."},{"from":"db","to":"next","transport":"SQL result","payload":"Row with the new id.","note":"src=app/api/orders/route.ts:18","narration":"Postgres returns the inserted row. The route uses only the id field."},{"from":"next","to":"browser","transport":"HTTP 201","payload":"{id: \u003cuuid\u003e}","note":"src=app/api/orders/route.ts:18","narration":"The route serialises the id into JSON and returns 201."}]},{"id":"stripe-webhook","category":"internal","title":"Stripe webhook fires","name":"Stripe webhook fires","tagline":"Stripe POSTs an event; the route verifies the signature and updates the order.","color":"#a855f7","trigger":"stripe","glossary_terms":["Webhook","Signature verification"],"narration":"Stripe POSTs a signed event to /api/webhooks/stripe. The route verifies the stripe-signature header against the webhook secret and updates the matching order row when the event is payment_intent.succeeded.","steps":[{"from":"stripe","to":"next","transport":"HTTP POST","payload":"POST /api/webhooks/stripe header stripe-signature=\u003csig\u003e body: raw event JSON","note":"src=app/api/webhooks/stripe/route.ts:14","narration":"Stripe sends the event with the stripe-signature header set. Next pipes the raw body in so the signature check sees the exact bytes Stripe signed."},{"from":"next","to":"next","transport":"in-process","payload":"stripe.webhooks.constructEvent(raw, signature, STRIPE_WEBHOOK_SECRET) → Event or 400.","note":"src=app/api/webhooks/stripe/route.ts:14","narration":"The route calls constructEvent to verify the signature. A bad signature returns 400 immediately without touching the database."},{"from":"next","to":"db","transport":"SQL","payload":"UPDATE orders SET status = 'paid' WHERE stripe_pi_id = \u003cpi.id\u003e","note":"src=app/api/webhooks/stripe/route.ts:14","narration":"For payment_intent.succeeded events the route runs an UPDATE on the matching order row."},{"from":"next","to":"stripe","transport":"HTTP 200","payload":"{received: true}","note":"src=app/api/webhooks/stripe/route.ts:14","narration":"The route returns 200 with a small JSON body so Stripe records the event as delivered."}]}],"glossary":{"Server component":"A Next.js 15 component that executes on the server and renders to HTML; it can await database calls inside its body.","API route":"A route handler under app/api that returns JSON; runs server-side per request.","Webhook":"An inbound HTTP POST from an external system carrying an event payload.","Signature verification":"Comparing an HMAC of the raw request body against a header value to confirm the sender and rule out tampering.","Zod":"A TypeScript schema library used here to parse incoming JSON bodies before they touch the database."},"actors":{"browser":{"label":"Browser","tech":"HTTP"},"next":{"label":"Next.js server","tech":"Node.js"},"db":{"label":"Postgres","tech":"SQL"},"stripe":{"label":"Stripe","tech":"webhook source"}},"categories":[{"id":"user","title":"What the user sees","blurb":"Page render and the API write.","mood":"default"},{"id":"internal","title":"Webhook traffic","blurb":"Signed events from Stripe.","mood":"default"}]}</script>
+
+<script>
+(() => {
+  const data = JSON.parse(document.getElementById("codestory-data").textContent);
+  if (!data || !data.flows) {
+    document.getElementById("cats").innerHTML =
+      '<div style="color:var(--mute);font-family:var(--font-mono);padding:24px;">No flows data injected. Run ops/render.py with --data &lt;flows.json&gt;.</div>';
+    return;
+  }
+  if (data.project_name) {
+    const pn = document.getElementById("project-name");
+    if (pn) pn.textContent = data.project_name;
+    document.title = data.project_name + " — stories";
+  }
+  if (data.lead) {
+    const le = document.getElementById("lead-text");
+    if (le) le.textContent = data.lead;
+  }
+  const actors = data.actors;
+  const NS = "http://www.w3.org/2000/svg";
+
+  // Whitelist sanitizer for narration. Permits ONLY <span class="who">...</span>
+  // and <span class="what">...</span>; everything else is escaped. Scar R10.
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+  function sanitizeNarration(s) {
+    if (s == null) return "";
+    const src = String(s);
+    let out = "";
+    let i = 0;
+    const re = /<span\s+class=("|')(who|what)\1\s*>([\s\S]*?)<\/span>/gi;
+    let m;
+    while ((m = re.exec(src)) !== null) {
+      out += escapeHtml(src.slice(i, m.index));
+      out += '<span class="' + m[2].toLowerCase() + '">' + escapeHtml(m[3]) + '</span>';
+      i = m.index + m[0].length;
+    }
+    out += escapeHtml(src.slice(i));
+    return out;
+  }
+
+  // ROUTING
+  let mode = "home";
+  let currentCat = null;
+  let currentFlow = null;
+  let currentScene = 0;
+  let playing = false;
+  let timer = null;
+  let raf = null;
+  let playerMode = "overview";
+  const SPEED = 0.7;
+  const _s = 1 / SPEED;
+  const sceneDuration = Math.round(3200 * _s);
+  const introDuration = Math.round(3600 * _s);
+  const outroDuration = Math.round(3600 * _s);
+  const packetHopMs   = Math.round(1100 * _s);
+  const packetLoopMs  = Math.round(1200 * _s);
+
+  const views = {
+    home: document.getElementById("v-home"),
+    chapter: document.getElementById("v-chapter"),
+    player: document.getElementById("v-player")
+  };
+
+  function setView(name) {
+    Object.values(views).forEach(v => v.classList.remove("active"));
+    views[name].classList.add("active");
+    mode = name;
+    updateCrumbs();
+  }
+
+  function updateCrumbs() {
+    const cHome = document.getElementById("crumb-home");
+    const cCat = document.getElementById("crumb-cat");
+    const cFlow = document.getElementById("crumb-flow");
+    const hint = document.getElementById("hint");
+    cHome.onclick = goHome;
+    cCat.onclick = () => currentCat && goCategory(currentCat.id);
+    cCat.style.display = currentCat ? "" : "none";
+    cFlow.style.display = currentFlow ? "" : "none";
+    cCat.textContent = currentCat ? currentCat.title : "";
+    cFlow.textContent = currentFlow ? currentFlow.name : "";
+    if (mode === "home") hint.textContent = "pick a chapter";
+    else if (mode === "chapter") hint.textContent = "click a story to watch it";
+    else if (mode === "player") hint.textContent = "press ? for shortcuts";
+  }
+
+  function goHome() {
+    currentCat = null; currentFlow = null;
+    stopAll();
+    history.replaceState(null, "", "#");
+    renderHome();
+    setView("home");
+  }
+
+  function goCategory(id) {
+    currentCat = data.categories.find(c => c.id === id);
+    currentFlow = null;
+    stopAll();
+    history.replaceState(null, "", "#cat=" + id);
+    renderChapter();
+    setView("chapter");
+  }
+
+  function goFlow(id) {
+    currentFlow = data.flows.find(f => f.id === id);
+    if (!currentFlow) return;
+    if (!currentCat) currentCat = data.categories.find(c => c.id === currentFlow.category);
+    currentScene = -1;
+    stopAll();
+    history.replaceState(null, "", "#flow=" + id);
+    setView("player");
+    setupPlayerMood();
+    renderDots();
+    playerMode = "overview";
+    syncModeButton();
+    renderOverview();
+    setTimeout(() => showShortcutsHint(true), 600);
+  }
+
+  function setPlayerMode(m) {
+    if (m === playerMode) return;
+    pause();
+    playerMode = m;
+    syncModeButton();
+    if (m === "overview") renderOverview();
+    else renderScene();
+  }
+
+  function syncModeButton() {
+    const btn = document.getElementById("btn-mode");
+    if (!btn) return;
+    btn.textContent = playerMode === "overview" ? "▶ scenes" : "overview";
+    btn.title = playerMode === "overview" ? "play scenes (O)" : "back to overview (O)";
+    const dots = document.getElementById("dots");
+    if (dots) dots.style.visibility = playerMode === "overview" ? "hidden" : "visible";
+    const sc = document.getElementById("scene-count");
+    if (sc) sc.style.visibility = playerMode === "overview" ? "hidden" : "visible";
+  }
+
+  // HOME — build via DOM, no innerHTML with untrusted text
+  function renderHome() {
+    const root = document.getElementById("cats");
+    root.innerHTML = "";
+    data.categories.forEach((c, i) => {
+      const card = document.createElement("div");
+      card.className = "cat";
+      const n = data.flows.filter(f => f.category === c.id).length;
+      const chap = document.createElement("div"); chap.className = "chap"; chap.textContent = "Chapter";
+      const num = document.createElement("div"); num.className = "num"; num.textContent = "0" + (i + 1);
+      const ttl = document.createElement("div"); ttl.className = "title"; ttl.textContent = c.title || "";
+      const blb = document.createElement("div"); blb.className = "blurb"; blb.textContent = c.blurb || "";
+      const cnt = document.createElement("div"); cnt.className = "count";
+      cnt.textContent = n + " " + (n === 1 ? "story" : "stories") + " →";
+      card.appendChild(chap); card.appendChild(num); card.appendChild(ttl); card.appendChild(blb); card.appendChild(cnt);
+      card.onclick = () => goCategory(c.id);
+      root.appendChild(card);
+    });
+  }
+
+  // CHAPTER LIST
+  function renderChapter() {
+    const el = document.getElementById("chapter-inner");
+    el.innerHTML = "";
+    const h2 = document.createElement("h2"); h2.textContent = currentCat.title || "";
+    const sub = document.createElement("div"); sub.className = "chap-sub"; sub.textContent = currentCat.blurb || "";
+    const list = document.createElement("div"); list.className = "stories";
+    el.appendChild(h2); el.appendChild(sub); el.appendChild(list);
+
+    const flows = data.flows.filter(f => f.category === currentCat.id);
+    flows.forEach(f => {
+      const card = document.createElement("div");
+      card.className = "story-card";
+      card.style.borderLeftColor = f.color || "var(--accent)";
+
+      const dot = document.createElement("span"); dot.className = "dot";
+      dot.style.background = f.color || "var(--accent)";
+
+      const body = document.createElement("div"); body.className = "body";
+      const ttl = document.createElement("div"); ttl.className = "title"; ttl.textContent = f.name || "";
+      const tag = document.createElement("div"); tag.className = "tagline"; tag.textContent = f.tagline || "";
+      const meta = document.createElement("div"); meta.className = "meta";
+
+      const trig = document.createElement("span"); trig.className = "tag"; trig.textContent = "trigger: " + (f.trigger || "");
+      meta.appendChild(trig);
+      if (f.schedule) {
+        meta.appendChild(document.createTextNode(" · "));
+        const sch = document.createElement("span"); sch.className = "tag"; sch.textContent = "@ " + f.schedule;
+        meta.appendChild(sch);
+      }
+      meta.appendChild(document.createTextNode(" · "));
+      const sc = document.createElement("span");
+      sc.textContent = f.steps.length + " scene" + (f.steps.length !== 1 ? "s" : "");
+      meta.appendChild(sc);
+
+      body.appendChild(ttl); body.appendChild(tag); body.appendChild(meta);
+
+      const play = document.createElement("div"); play.className = "play"; play.textContent = "▶ watch";
+
+      card.appendChild(dot); card.appendChild(body); card.appendChild(play);
+      card.onclick = () => goFlow(f.id);
+      list.appendChild(card);
+    });
+  }
+
+  // PLAYER
+  function setupPlayerMood() {
+    const root = document.getElementById("player-root");
+    root.classList.remove("night", "build");
+    if (currentCat.mood === "night") root.classList.add("night");
+    else if (currentCat.mood === "build") root.classList.add("build");
+  }
+
+  function totalScenes() { return currentFlow.steps.length + 2; }
+  function sceneIndexFromCurrent() { return currentScene + 1; }
+
+  function renderDots() {
+    const el = document.getElementById("dots");
+    el.innerHTML = "";
+    const n = totalScenes();
+    for (let i = 0; i < n; i++) {
+      const d = document.createElement("div");
+      d.className = "pd";
+      const fill = document.createElement("div");
+      fill.className = "fill";
+      d.appendChild(fill);
+      el.appendChild(d);
+    }
+    updateDotProgress(0);
+  }
+
+  function updateDotProgress(pct) {
+    const idx = sceneIndexFromCurrent();
+    const dots = document.querySelectorAll("#dots .pd");
+    dots.forEach((d, i) => {
+      d.classList.remove("current", "done");
+      const fill = d.querySelector(".fill");
+      if (i < idx) {
+        d.classList.add("done");
+        fill.style.transition = "transform 0.2s ease";
+        fill.style.transform = "translateX(0)";
+      } else if (i === idx) {
+        d.classList.add("current");
+        fill.style.transition = playing ? `transform linear ${currentSceneDuration()}ms` : "transform 0.2s ease";
+        fill.style.transform = `translateX(${pct - 100}%)`;
+      } else {
+        fill.style.transition = "transform 0.2s ease";
+        fill.style.transform = "translateX(-100%)";
+      }
+    });
+    document.getElementById("scene-count").textContent = `${idx + 1} / ${totalScenes()}`;
+  }
+
+  function currentSceneDuration() {
+    if (currentScene === -1) return introDuration;
+    if (currentScene === currentFlow.steps.length) return outroDuration;
+    const base = sceneDuration + (currentFlow.steps[currentScene].payload || "").length * 8;
+    return Math.max(2200 * _s, Math.min(4200 * _s, base));
+  }
+
+  function clearScene() {
+    const root = document.getElementById("scene-content");
+    root.innerHTML = "";
+  }
+
+  function el(tag, attrs = {}, children = []) {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "text") e.textContent = v;
+      else e.setAttribute(k, v);
+    }
+    (Array.isArray(children) ? children : [children]).forEach(c => c && e.appendChild(c));
+    return e;
+  }
+
+  // OVERVIEW (sequence diagram)
+  function renderOverview() {
+    clearScene();
+    const root = document.getElementById("scene-content");
+    const color = currentFlow.color;
+    const steps = currentFlow.steps;
+
+    const seen = new Set();
+    const lanes = [];
+    steps.forEach(s => {
+      if (!seen.has(s.from)) { seen.add(s.from); lanes.push(s.from); }
+      if (!seen.has(s.to))   { seen.add(s.to);   lanes.push(s.to); }
+    });
+
+    const W = 1200, H = 600;
+    const margin = { top: 70, bottom: 40, left: 40, right: 40 };
+    const innerW = W - margin.left - margin.right;
+    const innerH = H - margin.top - margin.bottom;
+    const colCount = lanes.length;
+    const colW = innerW / Math.max(1, colCount - 1 || 1);
+    const xFor = (i) => margin.left + (colCount === 1 ? innerW / 2 : i * colW);
+
+    lanes.forEach((id, i) => {
+      const x = xFor(i);
+      root.appendChild(el("line", {
+        x1: x, y1: margin.top + 8,
+        x2: x, y2: margin.top + innerH,
+        stroke: "var(--line)", "stroke-width": 1, "stroke-dasharray": "3 4"
+      }));
+    });
+
+    lanes.forEach((id, i) => {
+      const A = actors[id] || { label: id, tech: "" };
+      const x = xFor(i);
+      const pillW = Math.max(110, Math.min(200, (A.label.length + 4) * 7.5));
+      const pillH = 36;
+      const py = margin.top - pillH / 2 - 2;
+      const g = el("g");
+      g.appendChild(el("rect", {
+        x: x - pillW / 2, y: py - pillH / 2, width: pillW, height: pillH, rx: 8,
+        fill: "var(--panel)", stroke: color, "stroke-width": 1.5
+      }));
+      g.appendChild(el("text", {
+        x, y: py + 3, "text-anchor": "middle",
+        fill: "var(--ink)", "font-size": 12, "font-weight": 600,
+        "font-family": "ui-monospace, monospace",
+        text: A.label
+      }));
+      g.appendChild(el("text", {
+        x, y: py + 16, "text-anchor": "middle",
+        fill: "var(--mute)", "font-size": 9,
+        "font-family": "ui-monospace, monospace",
+        text: (A.tech || "").length > 22 ? (A.tech || "").slice(0, 20) + "…" : (A.tech || "")
+      }));
+      root.appendChild(g);
+    });
+
+    const rowsTop = margin.top + 32;
+    const rowsH = innerH - 32;
+    const stepCount = steps.length;
+    const stepH = Math.min(48, rowsH / stepCount);
+    const totalNeeded = stepH * stepCount;
+    const yFor = (i) => rowsTop + (i + 0.5) * stepH + Math.max(0, (rowsH - totalNeeded) / 2);
+
+    steps.forEach((s, i) => {
+      const y = yFor(i);
+      const fromX = xFor(lanes.indexOf(s.from));
+      const toX = xFor(lanes.indexOf(s.to));
+      const isSelf = s.from === s.to;
+
+      const g = el("g", { class: "ov-step", "data-step-idx": i, style: "cursor: pointer;" });
+
+      if (isSelf) {
+        const d = `M ${fromX} ${y - 8} q 24 -2 24 8 q 0 10 -24 8`;
+        g.appendChild(el("path", { d, fill: "none", stroke: color, "stroke-width": 2 }));
+        g.appendChild(el("path", {
+          d: `M ${fromX - 3} ${y + 6} L ${fromX + 4} ${y + 12} L ${fromX - 3} ${y + 12} Z`,
+          fill: color
+        }));
+      } else {
+        const x1 = fromX + (toX > fromX ? 8 : -8);
+        const x2 = toX + (toX > fromX ? -10 : 10);
+        g.appendChild(el("line", { x1, y1: y, x2, y2: y, stroke: color, "stroke-width": 2 }));
+        const dir = toX > fromX ? 1 : -1;
+        g.appendChild(el("path", {
+          d: `M ${x2} ${y} L ${x2 - 8 * dir} ${y - 5} L ${x2 - 8 * dir} ${y + 5} Z`,
+          fill: color
+        }));
+      }
+
+      const badgeX = fromX;
+      g.appendChild(el("circle", { cx: badgeX, cy: y, r: 11, fill: "var(--bg)", stroke: color, "stroke-width": 2 }));
+      g.appendChild(el("text", {
+        x: badgeX, y: y + 3.5, "text-anchor": "middle",
+        fill: color, "font-size": 11, "font-weight": 700,
+        "font-family": "ui-monospace, monospace", text: String(i + 1)
+      }));
+
+      const labelX = isSelf ? fromX + 50 : (fromX + toX) / 2;
+      const labelY = y - 8;
+      const transport = s.transport || "";
+      const tw = transport.length * 6.2 + 14;
+      g.appendChild(el("rect", {
+        x: labelX - tw / 2, y: labelY - 11, width: tw, height: 16, rx: 4,
+        fill: "var(--bg)", stroke: "var(--line)", "stroke-width": 1
+      }));
+      g.appendChild(el("text", {
+        x: labelX, y: labelY + 1, "text-anchor": "middle",
+        fill: "var(--ink)", "font-size": 10,
+        "font-family": "ui-monospace, monospace", text: transport
+      }));
+
+      if (toX !== fromX || isSelf) {
+        const payload = s.payload || "";
+        const truncated = payload.length > 78 ? payload.slice(0, 76) + "…" : payload;
+        g.appendChild(el("text", {
+          x: labelX, y: y + 18, "text-anchor": "middle",
+          fill: "var(--mute)", "font-size": 9.5,
+          "font-family": "-apple-system, system-ui, sans-serif",
+          text: truncated
+        }));
+      }
+
+      g.appendChild(el("rect", {
+        x: Math.min(fromX, toX) - 12, y: y - stepH / 2 + 2,
+        width: Math.abs(toX - fromX) + 24 || 60,
+        height: stepH - 4,
+        fill: "transparent", pointer: "all"
+      }));
+
+      g.addEventListener("click", () => { currentScene = i; setPlayerMode("scene"); });
+      g.addEventListener("mouseenter", () => { g.style.filter = "drop-shadow(0 0 8px " + color + "66)"; });
+      g.addEventListener("mouseleave", () => { g.style.filter = "none"; });
+
+      root.appendChild(g);
+    });
+
+    document.getElementById("step-label").textContent =
+      "OVERVIEW · " + steps.length + " steps · " + lanes.length + " services";
+    document.getElementById("narration").innerHTML =
+      escapeHtml(currentFlow.tagline || "") +
+      ' <span class="what">Click any step to zoom in, or press scenes to play through.</span>';
+  }
+
+  function renderScene() {
+    clearScene();
+    if (currentScene === -1) renderIntro();
+    else if (currentScene >= currentFlow.steps.length) renderOutro();
+    else renderStep(currentFlow.steps[currentScene]);
+
+    const sl = document.getElementById("step-label");
+    const nar = document.getElementById("narration");
+    if (currentScene === -1) {
+      sl.textContent = `Chapter — ${currentCat.title}`;
+      nar.innerHTML = `<span class="who">${escapeHtml(currentFlow.name || "")}</span> — ${escapeHtml(currentFlow.tagline || "")}`;
+    } else if (currentScene >= currentFlow.steps.length) {
+      sl.textContent = "End of story";
+      const stepCount = currentFlow.steps.length;
+      const involved = new Set();
+      currentFlow.steps.forEach(s => { involved.add(s.from); involved.add(s.to); });
+      nar.innerHTML = `${stepCount} scenes through ${involved.size} services. <span class="what">replay or pick another story.</span>`;
+    } else {
+      const step = currentFlow.steps[currentScene];
+      sl.textContent = `Scene ${currentScene + 1} of ${currentFlow.steps.length}`;
+      // Whitelist sanitizer — only <span class="who|what"> permitted as raw HTML
+      nar.innerHTML = sanitizeNarration(step.narration || `${(actors[step.from] || {}).label || step.from} talks to ${(actors[step.to] || {}).label || step.to}.`);
+    }
+    updateDotProgress(0);
+  }
+
+  function fadeIn(node, delay = 0, duration = 500) {
+    node.setAttribute("opacity", "0");
+    setTimeout(() => {
+      node.style.transition = `opacity ${duration}ms ease`;
+      node.setAttribute("opacity", "1");
+    }, delay);
+  }
+
+  function renderIntro() {
+    const root = document.getElementById("scene-content");
+    const color = currentFlow.color;
+    const cx = 600, cy = 300;
+    const w = 720, h = 320;
+    const x = cx - w / 2, y = cy - h / 2;
+    root.appendChild(el("rect", { x, y, width: w, height: h, rx: 16, class: "title-card", stroke: color }));
+    root.appendChild(el("text", { x: cx, y: y + 50, class: "title-chapter", text: (currentCat.title || "").toUpperCase() }));
+    root.appendChild(el("text", { x: cx, y: y + 130, class: "title-name", fill: color, text: currentFlow.name || "" }));
+    wrapText(root, currentFlow.tagline || "", cx, y + 180, w - 80, 22, "title-tag");
+    root.appendChild(el("text", { x: cx, y: y + h - 30, class: "title-cta", text: "▶  press space, or wait" }));
+  }
+
+  function renderOutro() {
+    const root = document.getElementById("scene-content");
+    const color = currentFlow.color;
+    const cx = 600, cy = 300;
+    const w = 560, h = 240;
+    const x = cx - w / 2, y = cy - h / 2;
+    root.appendChild(el("rect", { x, y, width: w, height: h, rx: 16, class: "title-card", stroke: color }));
+    root.appendChild(el("text", { x: cx, y: y + 60, class: "title-chapter", text: "END" }));
+    root.appendChild(el("text", { x: cx, y: y + 130, class: "title-name", fill: color, text: "fin." }));
+    root.appendChild(el("text", { x: cx, y: y + 180, class: "title-cta", text: "← back, or pick another story" }));
+  }
+
+  function renderStep(step) {
+    const root = document.getElementById("scene-content");
+    const color = currentFlow.color;
+    const isSelf = step.from === step.to;
+    if (isSelf) renderSelfScene(root, step, color);
+    else renderHopScene(root, step, color);
+  }
+
+  function renderHopScene(root, step, color) {
+    const fromA = actors[step.from] || { label: step.from, tech: "" };
+    const toA = actors[step.to] || { label: step.to, tech: "" };
+
+    const fromCx = 280, fromCy = 320;
+    const toCx = 920,  toCy = 320;
+    const cardW = 240, cardH = 96;
+
+    const fromG = makeActorCard(fromCx, fromCy, cardW, cardH, fromA, color);
+    root.appendChild(fromG);
+    const toG = makeActorCard(toCx, toCy, cardW, cardH, toA, color);
+    root.appendChild(toG);
+
+    const arcD = arcPath(fromCx + cardW/2 - 10, fromCy, toCx - cardW/2 + 10, toCy, -110);
+    root.appendChild(el("path", { d: arcD, class: "arc", stroke: color }));
+
+    const pillCx = (fromCx + toCx) / 2;
+    const pillCy = fromCy - 130;
+    const pillText = step.transport || "";
+    const pillW = pillText.length * 7 + 28;
+    root.appendChild(el("rect", {
+      x: pillCx - pillW / 2, y: pillCy - 14, width: pillW, height: 24, rx: 12,
+      class: "transport-pill-bg", stroke: color
+    }));
+    root.appendChild(el("text", { x: pillCx, y: pillCy + 4, class: "transport-pill-text", fill: color, text: pillText }));
+
+    const packetGroup = el("g");
+    packetGroup.appendChild(el("circle", { r: 18, fill: "url(#packetGlow)", opacity: "0.7" }));
+    packetGroup.appendChild(el("circle", { r: 7, class: "packet-shape", fill: "var(--packet)" }));
+    packetGroup.setAttribute("transform", `translate(${fromCx + cardW/2 - 10}, ${fromCy})`);
+    root.appendChild(packetGroup);
+
+    const speechG = el("g");
+    root.appendChild(speechG);
+
+    setTimeout(() => animatePacket(packetGroup, arcD, packetHopMs, () => {
+      pingActor(toG, color);
+      const bubbleX = toCx - 220;
+      const bubbleY = toCy + cardH / 2 + 24;
+      drawSpeechBubble(speechG, bubbleX, bubbleY, 440, step.payload || "", color, step.note, step.unknown ? (step.unknownReason || step.reason) : null);
+    }), 300);
+  }
+
+  function renderSelfScene(root, step, color) {
+    const A = actors[step.from] || { label: step.from, tech: "" };
+    const cx = 600, cy = 320;
+    const cardW = 320, cardH = 120;
+
+    const cardG = makeActorCard(cx, cy, cardW, cardH, A, color);
+    root.appendChild(cardG);
+
+    const arcD = `M ${cx - 80} ${cy - cardH/2} C ${cx - 110} ${cy - 180}, ${cx + 110} ${cy - 180}, ${cx + 80} ${cy - cardH/2}`;
+    root.appendChild(el("path", { d: arcD, class: "arc", stroke: color }));
+
+    const pillCy = cy - 170;
+    const pillText = step.transport || "";
+    const pillW = pillText.length * 7 + 28;
+    root.appendChild(el("rect", {
+      x: cx - pillW/2, y: pillCy - 14, width: pillW, height: 24, rx: 12,
+      class: "transport-pill-bg", stroke: color
+    }));
+    root.appendChild(el("text", { x: cx, y: pillCy + 4, class: "transport-pill-text", fill: color, text: pillText }));
+
+    const pkt = el("g");
+    pkt.appendChild(el("circle", { r: 18, fill: "url(#packetGlow)", opacity: "0.7" }));
+    pkt.appendChild(el("circle", { r: 7, class: "packet-shape", fill: "var(--packet)" }));
+    pkt.setAttribute("transform", `translate(${cx - 80}, ${cy - cardH/2})`);
+    root.appendChild(pkt);
+
+    const speechG = el("g");
+    root.appendChild(speechG);
+
+    setTimeout(() => animatePacket(pkt, arcD, packetLoopMs, () => {
+      pingActor(cardG, color);
+      drawSpeechBubble(speechG, cx - 240, cy + cardH/2 + 24, 480, step.payload || "", color, step.note, step.unknown ? (step.unknownReason || step.reason) : null);
+    }), 300);
+  }
+
+  function makeActorCard(cx, cy, w, h, A, color) {
+    const x = cx - w / 2, y = cy - h / 2;
+    const g = el("g");
+    g.appendChild(el("rect", {
+      x: x - 8, y: y - 8, width: w + 16, height: h + 16, rx: 18,
+      class: "actor-ring", stroke: color, "data-ring": "1"
+    }));
+    g.appendChild(el("rect", { x, y, width: w, height: h, rx: 12, class: "actor-card", stroke: color }));
+    g.appendChild(el("text", { x: cx, y: y + 42, class: "actor-name", text: A.label || "" }));
+    g.appendChild(el("text", { x: cx, y: y + 68, class: "actor-tech", text: A.tech || "" }));
+    return g;
+  }
+
+  function pingActor(g, color) {
+    const ring = g.querySelector('[data-ring="1"]');
+    if (!ring) return;
+    ring.setAttribute("opacity", "0.6");
+    ring.style.transition = "opacity 0.6s ease, stroke-width 0.6s ease";
+    ring.setAttribute("stroke-width", "4");
+    setTimeout(() => {
+      ring.setAttribute("stroke-width", "2");
+      ring.setAttribute("opacity", "0.15");
+    }, 600);
+  }
+
+  function arcPath(x1, y1, x2, y2, lift) {
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2 + lift;
+    return `M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`;
+  }
+
+  function drawSpeechBubble(parent, x, y, w, text, color, note, unknown) {
+    const lines = wrapTextMeasure(text || "", w - 40, 6.6, 5);
+    const noteLines = note ? wrapTextMeasure(note, w - 40, 6.4, 2) : [];
+    const unknownLines = unknown ? wrapTextMeasure(unknown, w - 40, 6.4, 2) : [];
+    const lineH = 16;
+    const padTop = 18, padBot = 18;
+    const h = padTop + lines.length * lineH
+            + (noteLines.length ? 8 + noteLines.length * 14 : 0)
+            + (unknownLines.length ? 8 + unknownLines.length * 14 : 0)
+            + padBot;
+
+    const g = el("g");
+    const px = x + w / 2;
+    g.appendChild(el("path", {
+      d: `M ${px - 9} ${y} L ${px} ${y - 9} L ${px + 9} ${y} Z`,
+      fill: "var(--panel-2)", stroke: color, "stroke-width": 1.5
+    }));
+    g.appendChild(el("rect", { x, y, width: w, height: h, rx: 10, class: "speech-bubble", stroke: color }));
+    lines.forEach((line, i) => {
+      g.appendChild(el("text", { x: x + 20, y: y + padTop + (i + 1) * lineH - 4, class: "speech-text", text: line }));
+    });
+    let cursor = padTop + lines.length * lineH;
+    if (noteLines.length) {
+      cursor += 4;
+      noteLines.forEach((line, i) => {
+        g.appendChild(el("text", {
+          x: x + 20, y: y + cursor + (i + 1) * 14 - 2,
+          fill: "var(--mute)", "font-size": "11", "font-style": "italic",
+          "font-family": "ui-monospace, monospace",
+          text: "note: " + line
+        }));
+      });
+      cursor += noteLines.length * 14 + 4;
+    }
+    if (unknownLines.length) {
+      cursor += 4;
+      unknownLines.forEach((line, i) => {
+        g.appendChild(el("text", {
+          x: x + 20, y: y + cursor + (i + 1) * 14 - 2,
+          fill: "var(--warn)", "font-size": "11",
+          "font-family": "ui-monospace, monospace",
+          text: "unknown: " + line
+        }));
+      });
+    }
+    parent.appendChild(g);
+    fadeIn(g, 0, 350);
+  }
+
+  function wrapTextMeasure(text, maxW, charW, maxLines) {
+    const maxChars = Math.floor(maxW / charW);
+    const words = String(text).split(/\s+/);
+    const out = [];
+    let line = "";
+    for (const w of words) {
+      const cand = line ? line + " " + w : w;
+      if (cand.length > maxChars) {
+        if (line) out.push(line);
+        line = w;
+      } else {
+        line = cand;
+      }
+      if (out.length >= maxLines) break;
+    }
+    if (line && out.length < maxLines) out.push(line);
+    if (out.length === maxLines) {
+      const total = out.join(" ").split(/\s+/).length;
+      if (total < words.length) {
+        const last = out[maxLines - 1];
+        const room = maxChars - last.length - 1;
+        if (room > 4) out[maxLines - 1] = last + "…";
+        else out[maxLines - 1] = last.slice(0, maxChars - 1) + "…";
+      }
+    }
+    return out;
+  }
+
+  function wrapText(parent, text, cx, y0, maxW, lineH, cls) {
+    const charW = 7.5;
+    const lines = wrapTextMeasure(text, maxW, charW, 4);
+    lines.forEach((l, i) => {
+      parent.appendChild(el("text", { x: cx, y: y0 + i * lineH, class: cls, "text-anchor": "middle", text: l }));
+    });
+  }
+
+  function animatePacket(group, pathD, duration, done) {
+    const tempPath = el("path", { d: pathD });
+    document.getElementById("scene").appendChild(tempPath);
+    const total = tempPath.getTotalLength();
+    tempPath.remove();
+    const t0 = performance.now();
+    const ptPath = el("path", { d: pathD, fill: "none", stroke: "none" });
+    document.getElementById("scene").appendChild(ptPath);
+
+    function frame(now) {
+      const t = Math.min(1, (now - t0) / duration);
+      const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      const pt = ptPath.getPointAtLength(total * ease);
+      group.setAttribute("transform", `translate(${pt.x}, ${pt.y})`);
+      group.setAttribute("opacity", "1");
+      if (t < 1) raf = requestAnimationFrame(frame);
+      else { ptPath.remove(); done && done(); }
+    }
+    raf = requestAnimationFrame(frame);
+  }
+
+  // PLAYBACK
+  function play() {
+    if (!currentFlow) return;
+    playing = true;
+    document.getElementById("btn-pause").textContent = "pause";
+    runScene();
+  }
+  function pause() {
+    playing = false;
+    document.getElementById("btn-pause").textContent = "play";
+    clearTimeout(timer);
+    if (raf) { cancelAnimationFrame(raf); raf = null; }
+  }
+  function stopAll() {
+    pause();
+    cancelShortcutsTimers && cancelShortcutsTimers();
+    const panel = document.getElementById("shortcuts");
+    if (panel) panel.classList.remove("show");
+  }
+  function togglePlay() {
+    if (playerMode === "overview") {
+      currentScene = -1;
+      setPlayerMode("scene");
+      play();
+      return;
+    }
+    if (playing) pause();
+    else {
+      if (currentFlow && currentScene >= currentFlow.steps.length) currentScene = -1;
+      play();
+    }
+  }
+  function runScene() {
+    if (!currentFlow || !playing) return;
+    renderScene();
+    requestAnimationFrame(() => updateDotProgress(100));
+    timer = setTimeout(() => {
+      if (!playing) return;
+      if (currentScene >= currentFlow.steps.length) { pause(); return; }
+      currentScene += 1;
+      runScene();
+    }, currentSceneDuration());
+  }
+  function step(delta) {
+    if (!currentFlow) return;
+    pause();
+    if (playerMode === "overview") {
+      playerMode = "scene";
+      syncModeButton();
+      if (currentScene < 0) currentScene = delta > 0 ? 0 : -1;
+    }
+    const max = currentFlow.steps.length;
+    currentScene = Math.max(-1, Math.min(max, currentScene + delta));
+    renderScene();
+  }
+  function replay() {
+    currentScene = -1;
+    pause();
+    if (playerMode !== "scene") { playerMode = "scene"; syncModeButton(); }
+    renderScene();
+    play();
+  }
+
+  document.getElementById("btn-pause").onclick = togglePlay;
+  document.getElementById("btn-replay").onclick = replay;
+  document.getElementById("btn-exit").onclick = () => currentCat ? goCategory(currentCat.id) : goHome();
+  document.getElementById("btn-mode").onclick = () => setPlayerMode(playerMode === "overview" ? "scene" : "overview");
+
+  // SHORTCUTS PANEL
+  let shortcutsFadeTimer = null;
+  let shortcutsCycleTimer = null;
+  let shortcutsCycleIdx = 0;
+  const SHORTCUT_KEY_SEQ = ["space", "left", "right", "r", "o", "i", "esc"];
+  const KEY_HOLD_MS = Math.round(420 * _s);
+  const KEY_GAP_MS  = Math.round(180 * _s);
+  const SHORTCUT_LINGER_MS = 30000;
+
+  function showShortcutsHint(auto) {
+    const panel = document.getElementById("shortcuts");
+    if (!panel) return;
+    panel.classList.add("show");
+    cancelShortcutsTimers();
+    runShortcutCycle();
+    shortcutsFadeTimer = setTimeout(hideShortcutsHint, SHORTCUT_LINGER_MS);
+    flashHelpButton(false);
+  }
+  function hideShortcutsHint() {
+    const panel = document.getElementById("shortcuts");
+    if (!panel) return;
+    panel.classList.remove("show");
+    cancelShortcutsTimers();
+    clearAllKeyPresses();
+    flashHelpButton(true);
+  }
+  function cancelShortcutsTimers() {
+    if (shortcutsFadeTimer) { clearTimeout(shortcutsFadeTimer); shortcutsFadeTimer = null; }
+    if (shortcutsCycleTimer) { clearTimeout(shortcutsCycleTimer); shortcutsCycleTimer = null; }
+  }
+  function runShortcutCycle() {
+    shortcutsCycleIdx = 0;
+    function tick() {
+      clearAllKeyPresses();
+      const key = SHORTCUT_KEY_SEQ[shortcutsCycleIdx % SHORTCUT_KEY_SEQ.length];
+      const kbd = document.querySelector(`.kbd[data-k="${key}"]`);
+      if (kbd) kbd.classList.add("pressed");
+      shortcutsCycleTimer = setTimeout(() => {
+        clearAllKeyPresses();
+        shortcutsCycleTimer = setTimeout(() => { shortcutsCycleIdx += 1; tick(); }, KEY_GAP_MS);
+      }, KEY_HOLD_MS);
+    }
+    tick();
+  }
+  function clearAllKeyPresses() {
+    document.querySelectorAll(".kbd.pressed").forEach(k => k.classList.remove("pressed"));
+  }
+  function flashKey(name) {
+    const kbd = document.querySelector(`.kbd[data-k="${name}"]`);
+    if (!kbd) return;
+    kbd.classList.add("pressed");
+    setTimeout(() => kbd.classList.remove("pressed"), 140);
+  }
+  function flashHelpButton(on) {
+    const btn = document.getElementById("btn-help");
+    if (!btn) return;
+    btn.classList.remove("attention");
+    if (on) { void btn.offsetWidth; btn.classList.add("attention"); }
+  }
+
+  document.getElementById("btn-help").onclick = () => {
+    const panel = document.getElementById("shortcuts");
+    if (panel.classList.contains("show")) hideShortcutsHint();
+    else showShortcutsHint(false);
+  };
+  document.getElementById("shortcuts-close").onclick = hideShortcutsHint;
+
+  // GLOSSARY
+  function showGlossary() {
+    const panel = document.getElementById("glossary");
+    if (!panel || !currentFlow) return;
+    const body = document.getElementById("glossary-body");
+    const nameSpan = document.getElementById("glossary-flow-name");
+    nameSpan.textContent = currentFlow.name || "";
+    body.innerHTML = "";
+    const glossary = data.glossary || {};
+    const terms = (currentFlow.glossary_terms || [])
+      .map(k => ({ term: k, def: glossary[k] || "" }))
+      .filter(t => t.def);
+    if (terms.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "gl-empty";
+      empty.textContent = "No glossary entries for this story yet.";
+      body.appendChild(empty);
+    } else {
+      terms.forEach(t => {
+        const d = document.createElement("div");
+        d.className = "gl-term";
+        const name = document.createElement("div"); name.className = "name"; name.textContent = t.term;
+        const def = document.createElement("div"); def.className = "def"; def.textContent = t.def;
+        d.appendChild(name); d.appendChild(def);
+        body.appendChild(d);
+      });
+    }
+    panel.classList.add("show");
+  }
+  function hideGlossary() {
+    const panel = document.getElementById("glossary");
+    if (panel) panel.classList.remove("show");
+  }
+  function toggleGlossary() {
+    const panel = document.getElementById("glossary");
+    if (!panel) return;
+    if (panel.classList.contains("show")) hideGlossary();
+    else showGlossary();
+  }
+  document.getElementById("btn-info").onclick = toggleGlossary;
+  document.getElementById("glossary-close").onclick = hideGlossary;
+
+  // KEYBOARD
+  window.addEventListener("keydown", (e) => {
+    if (mode === "player") {
+      if (e.key === " ") { e.preventDefault(); flashKey("space"); togglePlay(); }
+      else if (e.key === "ArrowLeft") { flashKey("left"); step(-1); }
+      else if (e.key === "ArrowRight") { flashKey("right"); step(1); }
+      else if (e.key === "r" || e.key === "R") { flashKey("r"); replay(); }
+      else if (e.key === "i" || e.key === "I") { flashKey("i"); toggleGlossary(); }
+      else if (e.key === "o" || e.key === "O") { flashKey("o"); setPlayerMode(playerMode === "overview" ? "scene" : "overview"); }
+      else if (e.key === "?") { showShortcutsHint(false); }
+      else if (e.key === "Escape") { flashKey("esc"); currentCat ? goCategory(currentCat.id) : goHome(); }
+    } else if (mode === "chapter") {
+      if (e.key === "Escape") goHome();
+    }
+  });
+
+  // DEEP LINK
+  function readHash() {
+    const mf = /#flow=([^&]+)/.exec(location.hash);
+    const mc = /#cat=([^&]+)/.exec(location.hash);
+    if (mf) goFlow(decodeURIComponent(mf[1]));
+    else if (mc) goCategory(decodeURIComponent(mc[1]));
+    else goHome();
+  }
+
+  renderHome();
+  readHash();
+  window.addEventListener("hashchange", readHash);
+})();
+</script>
+</body>
+</html>
