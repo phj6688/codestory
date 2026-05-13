@@ -1,0 +1,86 @@
+name: PR byte deltas
+
+on:
+  pull_request:
+
+jobs:
+  byte-deltas:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: checkout PR head
+        uses: actions/checkout@v4
+        with:
+          path: head
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: checkout PR base
+        uses: actions/checkout@v4
+        with:
+          path: base
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: render base and head, compute deltas
+        id: deltas
+        run: |
+          set -e
+          examples="medchat fastapi-starter nextjs-starter django-celery"
+          themes="cococream dark minimal nothing-design"
+          out_md=delta.md
+          {
+            echo "<!-- codestory-pr-bytes-bot -->"
+            echo "## codestory byte deltas"
+            echo
+            echo "Each cell is \`head bytes (delta vs base)\`. Threshold is 250 KB."
+            echo
+            echo "| example | $(for t in $themes; do printf '%s | ' "$t"; done)"
+            echo "|---|$(for t in $themes; do printf -- '---|'; done)"
+          } > "$out_md"
+          for ex in $examples; do
+            row="| $ex |"
+            for theme in $themes; do
+              base_out="/tmp/base-$ex-$theme.html"
+              head_out="/tmp/head-$ex-$theme.html"
+              base_size=0
+              head_size=0
+              if [ -f "base/examples/$ex/flows.json" ]; then
+                (cd base && python3 ops/render.py --theme "$theme" --data "examples/$ex/flows.json" --out "$base_out") > /dev/null
+                base_size=$(wc -c < "$base_out")
+              fi
+              if [ -f "head/examples/$ex/flows.json" ]; then
+                (cd head && python3 ops/render.py --theme "$theme" --data "examples/$ex/flows.json" --out "$head_out") > /dev/null
+                head_size=$(wc -c < "$head_out")
+              fi
+              delta=$((head_size - base_size))
+              if [ "$delta" -gt 0 ]; then
+                row="$row ${head_size} (+${delta}) |"
+              else
+                row="$row ${head_size} (${delta}) |"
+              fi
+            done
+            echo "$row" >> "$out_md"
+          done
+          echo >> "$out_md"
+          echo "_Posted by the codestory PR bytes bot. Re-runs on every push._" >> "$out_md"
+
+      - name: find existing comment
+        id: find
+        uses: peter-evans/find-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: github-actions[bot]
+          body-includes: codestory-pr-bytes-bot
+
+      - name: create or update sticky comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: delta.md
+          edit-mode: replace

@@ -1,0 +1,1244 @@
+{
+  "project_name": "medchat",
+  "units": [
+    {
+      "id": "user",
+      "kind": "service",
+      "label": "User",
+      "role": "End user typing questions in a browser session."
+    },
+    {
+      "id": "cf",
+      "kind": "service",
+      "label": "Cloudflare",
+      "role": "Cloudflare Tunnel terminating TLS and piping traffic into the homelab."
+    },
+    {
+      "id": "traefik",
+      "kind": "service",
+      "label": "Traefik",
+      "role": "Reverse proxy that routes Host headers to the right internal container."
+    },
+    {
+      "id": "openwebui",
+      "kind": "service",
+      "label": "OpenWebUI",
+      "role": "Chat front-end; speaks the OpenAI API to local and remote model backends."
+    },
+    {
+      "id": "operator",
+      "kind": "service",
+      "label": "operator",
+      "role": "Host shell account running scripts and docker compose commands."
+    },
+    {
+      "id": "cron",
+      "kind": "service",
+      "label": "host cron",
+      "role": "Host scheduler that fires the three nightly and per-minute jobs."
+    },
+    {
+      "id": "medchat_mcp",
+      "kind": "service",
+      "label": "medchat-mcp",
+      "role": "FastAPI sidecar exposing tools, citecheck, the MCP server, and the audit endpoints."
+    },
+    {
+      "id": "ingest",
+      "kind": "service",
+      "label": "ingest",
+      "role": "Batch worker that fetches corpora, embeds chunks, and upserts pgvector rows."
+    },
+    {
+      "id": "llama",
+      "kind": "service",
+      "label": "llama-server",
+      "role": "Resident llama-server process running MedGemma-4B with the OpenAI API on :8080."
+    },
+    {
+      "id": "nexus",
+      "kind": "service",
+      "label": "nexus-router",
+      "role": "Remote nexus-router proxy to Claude Sonnet for the cloud route."
+    },
+    {
+      "id": "ollama",
+      "kind": "service",
+      "label": "Ollama",
+      "role": "Local embedding server running qwen3-embedding:8b."
+    },
+    {
+      "id": "files",
+      "kind": "service",
+      "label": "files-service",
+      "role": "Files microservice serving uploaded document retrieval."
+    },
+    {
+      "id": "postgres",
+      "kind": "service",
+      "label": "PostgreSQL",
+      "role": "PostgreSQL with pgvector storing audit rows, RAG chunks, and embeddings."
+    },
+    {
+      "id": "ext_med_apis",
+      "kind": "service",
+      "label": "medical APIs",
+      "role": "PubMed, ClinicalTrials, OpenFDA, RxNorm, EuropePMC public APIs."
+    },
+    {
+      "id": "ext_corpora",
+      "kind": "service",
+      "label": "corpora",
+      "role": "DailyMed, CDC, NIH, USPSTF, WHO and other source corpora fetched nightly."
+    },
+    {
+      "id": "huggingface",
+      "kind": "service",
+      "label": "HuggingFace",
+      "role": "Model registry the resident model weights are downloaded from once."
+    },
+    {
+      "id": "host_fs",
+      "kind": "service",
+      "label": "host disk",
+      "role": "Host disk path for logs, sentinels, and the BENCHMARKS.md audit trail."
+    }
+  ],
+  "flows": [
+    {
+      "id": "f1-direct-chat",
+      "category": "user",
+      "title": "Direct chat",
+      "narration": "A signed-in user sends one message; the request crosses Cloudflare and Traefik to OpenWebUI, which streams a reply directly from the resident llama-server.",
+      "steps": [
+        {
+          "from": "user",
+          "to": "cf",
+          "transport": "HTTPS",
+          "narration": "A user opens medchat in their browser and types a question. When they press enter, the browser sends an HTTPS POST to <span class='who'>medchat.peyman.io</span>. The request carries a session cookie that proves the user is signed in &mdash; it was set earlier when they logged in through the OpenID Connect single-sign-on flow.",
+          "payload": "POST /api/chat/completions with the user's message.",
+          "note": "src=docker-compose.yml:12"
+        },
+        {
+          "from": "cf",
+          "to": "traefik",
+          "transport": "tunnel",
+          "narration": "The request reaches Cloudflare first. Because the homelab keeps every public port closed, Cloudflare cannot connect to it directly. Instead, a Cloudflare Tunnel that the homelab opened earlier pipes the request safely inward, delivering it onto the internal <span class='what'>platform-net</span> Docker network.",
+          "payload": "HTTPS tunnel, Host=medchat.peyman.io.",
+          "note": "src=compose/traefik-medchat.yml:8"
+        },
+        {
+          "from": "traefik",
+          "to": "openwebui",
+          "transport": "HTTP :8080",
+          "narration": "Inside the homelab, Traefik is the gatekeeper that decides which container serves which hostname. It reads the request's <span class='what'>Host: medchat.peyman.io</span> header and forwards the request to the open-webui container listening on port 8080.",
+          "payload": "Plain HTTP to open-webui:8080.",
+          "note": "src=compose/traefik-medchat.yml:24"
+        },
+        {
+          "from": "openwebui",
+          "to": "llama",
+          "transport": "OpenAI API",
+          "narration": "OpenWebUI is the chat user interface. No tools are involved on this turn, so it simply forwards the question to the local language model. It calls llama-server using the OpenAI-compatible <span class='what'>/v1/chat/completions</span> API, asking the resident model (alias 'medchat') for a reply.",
+          "payload": "POST /v1/chat/completions, model='medchat'. DEFAULT_MODELS is set.",
+          "note": "No tool server attached on this turn. (src=ops/setup-openwebui.sh:88)"
+        },
+        {
+          "from": "llama",
+          "to": "openwebui",
+          "transport": "SSE stream",
+          "narration": "llama-server runs MedGemma-4B (a 4-billion-parameter open medical model) on the homelab's GPU. As soon as the model starts producing tokens, llama-server streams them back to OpenWebUI one at a time over Server-Sent Events (SSE), so the user does not have to wait for the entire reply.",
+          "payload": "Server-sent events with assistant content deltas.",
+          "note": "src=docker-compose.yml:120"
+        },
+        {
+          "from": "openwebui",
+          "to": "user",
+          "transport": "SSE",
+          "narration": "OpenWebUI relays the streamed tokens out to the browser, where the answer appears word by word. Before display, a small filter called <span class='who'>strip_tool_chips</span> scrubs any leftover tool-call markup from the text, so the reader only sees clean prose.",
+          "payload": "Rendered markdown back through Traefik and Cloudflare.",
+          "note": "src=docker-compose.yml:60"
+        }
+      ],
+      "name": "Direct chat",
+      "color": "#10b981",
+      "trigger": "user",
+      "tagline": "The simplest path. A question goes in, an answer comes back, no tools in the middle.",
+      "glossary_terms": [
+        "OIDC",
+        "Cloudflare Tunnel",
+        "Traefik",
+        "platform-net",
+        "OpenAI API",
+        "SSE",
+        "strip_tool_chips"
+      ]
+    },
+    {
+      "id": "f2-tools-chat",
+      "category": "user",
+      "title": "Tools chat",
+      "narration": "OpenWebUI discovers the tool server's OpenAPI schema, the local model emits a tool call, OpenWebUI dispatches it to medchat-mcp, and the model writes the cited answer in a follow-up turn.",
+      "steps": [
+        {
+          "from": "user",
+          "to": "openwebui",
+          "transport": "HTTPS",
+          "narration": "A user asks a medical question with the <span class='who'>MedChat Tools</span> server enabled. The request reaches OpenWebUI by the same path as a direct chat &mdash; Cloudflare, then Traefik, then the container &mdash; but this time tools are in play.",
+          "payload": "Chat turn through Cloudflare and Traefik.",
+          "note": "src=compose/traefik-medchat.yml:24"
+        },
+        {
+          "from": "openwebui",
+          "to": "medchat_mcp",
+          "transport": "GET /openapi.json",
+          "narration": "Before forwarding the question to the model, OpenWebUI fetches the catalogue of available tools from medchat-mcp. FastAPI publishes that catalogue automatically as an OpenAPI schema at <span class='what'>/openapi.json</span>. Every endpoint listed there becomes a tool the model can choose.",
+          "payload": "GET http://medchat-mcp:8001/openapi.json.",
+          "note": "Wired via TOOL_SERVER_CONNECTIONS env. (src=medchat-mcp/src/medchat_mcp/main.py:42)"
+        },
+        {
+          "from": "openwebui",
+          "to": "llama",
+          "transport": "OpenAI API",
+          "narration": "OpenWebUI now calls llama-server, but along with the user's question it attaches the tool definitions. The model is effectively told: 'these are the functions you can call if you need help.'",
+          "payload": "POST /v1/chat/completions with tools=[...].",
+          "note": "src=ops/setup-openwebui.sh:120"
+        },
+        {
+          "from": "llama",
+          "to": "openwebui",
+          "transport": "OpenAI API",
+          "narration": "The model reads the question, decides it needs evidence from the literature, and returns a <span class='what'>tool_call</span> instead of a plain answer. The tool_call names the function (pubmed_search) and supplies the JSON arguments to call it with (for example <span class='what'>{query, top_k:5}</span>).",
+          "payload": "tool_calls: [{ pubmed_search({query, top_k:5}) }].",
+          "note": "src=docker-compose.yml:90"
+        },
+        {
+          "from": "openwebui",
+          "to": "medchat_mcp",
+          "transport": "POST",
+          "narration": "OpenWebUI is responsible for actually running the tool. It POSTs the model's arguments to medchat-mcp at <span class='what'>/tools/pubmed_search</span>. The model itself never touches the network &mdash; OpenWebUI is its hands.",
+          "payload": "POST /tools/pubmed_search with the model's JSON arguments.",
+          "note": "src=medchat-mcp/src/medchat_mcp/routes.py:55"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "ext_med_apis",
+          "transport": "HTTPS GET",
+          "narration": "medchat-mcp executes the search by calling NCBI's E-utilities, the public HTTP API behind PubMed. Soft and hard timeouts come from <span class='what'>MEDCHAT_TOOL_TIMEOUT_*_MS</span>, so a slow upstream cannot hang the whole turn.",
+          "payload": "Soft/hard timeouts from MEDCHAT_TOOL_TIMEOUT_*_MS.",
+          "note": "src=medchat-mcp/src/medchat_mcp/tools/pubmed.py:24"
+        },
+        {
+          "from": "ext_med_apis",
+          "to": "medchat_mcp",
+          "transport": "HTTPS",
+          "narration": "NCBI returns raw JSON. medchat-mcp normalizes it into a <span class='what'>ToolResult</span> of the form <span class='what'>{results: [...], note?: '...'}</span>. By contract, tools never return a 5xx error &mdash; if NCBI is slow or broken, the result is simply an empty list with a descriptive note.",
+          "payload": "Raw JSON normalized into ToolResult{results, note}.",
+          "note": "src=medchat-mcp/src/medchat_mcp/tools/common.py:18"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "openwebui",
+          "transport": "POST resp",
+          "narration": "The ToolResult travels back to OpenWebUI as an ordinary HTTP response. OpenWebUI now has structured evidence to hand back to the model.",
+          "payload": "ToolResult.",
+          "note": "src=medchat-mcp/src/medchat_mcp/routes.py:78"
+        },
+        {
+          "from": "openwebui",
+          "to": "llama",
+          "transport": "OpenAI API",
+          "narration": "OpenWebUI calls llama-server again, this time appending the tool result as an extra message. The model can now read what was found and write the actual answer.",
+          "payload": "Follow-up POST with the tool message appended.",
+          "note": "src=ops/setup-openwebui.sh:140"
+        },
+        {
+          "from": "llama",
+          "to": "openwebui",
+          "transport": "OpenAI API",
+          "narration": "The model writes the final reply, weaving in citation markers like <span class='what'>[PubMed:12345]</span> to point at the papers it relied on.",
+          "payload": "Final content with markers like [PubMed:12345].",
+          "note": "src=docker-compose.yml:90"
+        },
+        {
+          "from": "openwebui",
+          "to": "user",
+          "transport": "SSE",
+          "narration": "OpenWebUI sends the reply out to the browser. A filter called <span class='who'>citation_links</span> rewrites every marker into a numbered hyperlink and appends a Sources panel listing every cited paper.",
+          "payload": "Rendered answer with clickable citations.",
+          "note": "src=docker-compose.yml:60"
+        }
+      ],
+      "name": "Tools chat",
+      "color": "#f59e0b",
+      "trigger": "user",
+      "tagline": "The local model decides it needs help. It calls a medical tool, then writes its answer.",
+      "glossary_terms": [
+        "OpenAPI",
+        "tool server",
+        "TOOL_SERVER_CONNECTIONS",
+        "ToolResult",
+        "PubMed",
+        "NCBI E-utilities",
+        "citation_links"
+      ]
+    },
+    {
+      "id": "f3-cloud-consult-rest",
+      "category": "user",
+      "title": "Cloud consult (REST)",
+      "narration": "A caller POSTs to medchat-mcp; the orchestrator drives Claude Sonnet through a bounded tool loop, citecheck strips uncited claims, and the final envelope returns with sources.",
+      "steps": [
+        {
+          "from": "user",
+          "to": "medchat_mcp",
+          "transport": "POST",
+          "narration": "A caller &mdash; an external script, a curl command, or OpenWebUI in cloud-only mode &mdash; POSTs to medchat-mcp at <span class='what'>/v1/chat/completions</span> with the standard OpenAI-shaped body <span class='what'>{messages, format}</span>. If external auth is enabled, the request must carry a bearer token from <span class='what'>MEDCHAT_API_KEYS</span>.",
+          "payload": "POST /v1/chat/completions {messages, format}.",
+          "note": "src=medchat-mcp/src/medchat_mcp/routes.py:30"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "nexus",
+          "transport": "OpenAI API",
+          "narration": "medchat-mcp asks Claude Sonnet (the cloud LLM) to think about the question. It does this through nexus-router, an in-house OpenAI-compatible proxy that holds the cloud credentials. The call carries the full tool catalogue (<span class='what'>TOOL_DEFS</span>) and <span class='what'>tool_choice='auto'</span>, leaving Sonnet free to decide which tools to use. The entire orchestration loop is capped at three rounds, so a confused model cannot run forever.",
+          "payload": "model='claude-sonnet-4-6', tool_choice='auto'. Bearer NEXUS_ROUTER_TOKEN_MEDCHAT.",
+          "note": "Loop capped at max_rounds=3. (src=medchat-mcp/src/medchat_mcp/orchestrator.py:48)"
+        },
+        {
+          "from": "nexus",
+          "to": "medchat_mcp",
+          "transport": "OpenAI API",
+          "narration": "Sonnet replies. Either it has chosen its final answer (the loop ends), or it asks medchat-mcp to run one or more tools first.",
+          "payload": "Either content or tool_calls to dispatch.",
+          "note": "src=medchat-mcp/src/medchat_mcp/orchestrator.py:90"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "ext_med_apis",
+          "transport": "HTTPS",
+          "narration": "medchat-mcp executes each requested tool. Depending on what Sonnet asked for, this fans out to PubMed, ClinicalTrials.gov, openFDA, RxNav, or Europe PMC &mdash; the medical APIs medchat-mcp wraps.",
+          "payload": "pubmed / clinicaltrials / openfda / rxnorm / europepmc.",
+          "note": "src=medchat-mcp/src/medchat_mcp/tools/__init__.py:14"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "nexus",
+          "transport": "OpenAI API",
+          "narration": "The tool results are sent back to Sonnet as a follow-up message. Armed with this evidence, Sonnet drafts the user-facing answer and signals that the loop can end.",
+          "payload": "Next round with tool messages appended.",
+          "note": "src=medchat-mcp/src/medchat_mcp/orchestrator.py:140"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "medchat_mcp",
+          "transport": "citecheck",
+          "narration": "Before the answer reaches the user, an internal gate called <span class='who'>citecheck</span> inspects it. citecheck builds an <span class='what'>EvidencePack</span> from this turn's tool results, then walks the draft sentence by sentence. Any factual sentence without a matching citation marker is stripped out. A pack hash is recorded for the audit log, and the rolling stub-rate is updated.",
+          "payload": "EvidencePack built from tool results; uncited sentences removed; pack_hash computed.",
+          "note": "src=medchat-mcp/src/medchat_mcp/citecheck.py:22"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "user",
+          "transport": "HTTP resp",
+          "narration": "The cleaned answer leaves medchat-mcp wrapped in metadata: the answer text, a list of structured sources, the citation markers themselves, and a <span class='what'>meta</span> object describing whether the safety stub was used, how many orchestration rounds ran, and the total latency in milliseconds.",
+          "payload": "ChatCompletionOut{answer, sources, citations, meta{stub_used, rounds, latency_ms}}.",
+          "note": "src=medchat-mcp/src/medchat_mcp/routes.py:62"
+        }
+      ],
+      "name": "Cloud consult (REST)",
+      "color": "#06b6d4",
+      "trigger": "user",
+      "tagline": "The heaviest path. medchat-mcp orchestrates Claude Sonnet through a tool loop, then checks every citation.",
+      "glossary_terms": [
+        "nexus-router",
+        "Claude Sonnet",
+        "TOOL_DEFS",
+        "citecheck",
+        "EvidencePack",
+        "stub",
+        "stub-rate",
+        "auto-quiesce"
+      ]
+    },
+    {
+      "id": "f4-mcp-consult",
+      "category": "user",
+      "title": "MCP consult",
+      "narration": "An external MCP client opens an SSE channel to /mcp and invokes medchat_consult; the orchestrator runs the same tool loop and streams the response back through the channel.",
+      "steps": [
+        {
+          "from": "user",
+          "to": "medchat_mcp",
+          "transport": "SSE /mcp",
+          "narration": "An external MCP client &mdash; for example, an automation script or another agent that speaks Model Context Protocol &mdash; opens a Server-Sent Events channel to medchat-mcp at <span class='what'>/mcp</span>. Through that channel it invokes the tool <span class='what'>medchat_consult({question, format})</span>. Same orchestrator, different doorway.",
+          "payload": "Tool invocation: medchat_consult({question, format}).",
+          "note": "src=medchat-mcp/src/medchat_mcp/mcp_server.py:18"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "nexus",
+          "transport": "OpenAI API",
+          "narration": "Internally, medchat-mcp runs the exact same Claude Sonnet tool-calling loop used by the REST endpoint. Reusing the orchestrator means MCP callers and REST callers can never drift apart.",
+          "payload": "model='claude-sonnet-4-6'.",
+          "note": "src=medchat-mcp/src/medchat_mcp/orchestrator.py:48"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "ext_med_apis",
+          "transport": "HTTPS",
+          "narration": "Sonnet's tool calls fan out to the medical APIs (PubMed, ClinicalTrials.gov, openFDA, RxNav, Europe PMC), just as they do in the REST flow.",
+          "payload": "Tools dispatched.",
+          "note": "src=medchat-mcp/src/medchat_mcp/tools/__init__.py:14"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "user",
+          "transport": "SSE /mcp",
+          "narration": "The final answer is streamed back over the same SSE channel. Callers that asked for <span class='what'>format='text'</span> receive plain prose; callers that asked for <span class='what'>format='json'</span> receive the full envelope of answer, sources, citations, and metadata.",
+          "payload": "Plain text (format='text') or full JSON envelope (format='json').",
+          "note": "src=medchat-mcp/src/medchat_mcp/mcp_server.py:74"
+        }
+      ],
+      "name": "MCP consult",
+      "color": "#a78bfa",
+      "trigger": "user",
+      "tagline": "An external MCP client calls medchat_consult over SSE. Same loop, different doorway.",
+      "glossary_terms": [
+        "MCP",
+        "FastMCP",
+        "SSE",
+        "nexus-router",
+        "Claude Sonnet"
+      ]
+    },
+    {
+      "id": "f5-rag-search",
+      "category": "user",
+      "title": "RAG search",
+      "narration": "medchat-mcp embeds the query with Ollama, runs a cosine-distance lookup in pgvector, and returns the top-k chunks tagged with [RAG:<chunk_id>] markers.",
+      "steps": [
+        {
+          "from": "openwebui",
+          "to": "medchat_mcp",
+          "transport": "POST",
+          "narration": "Some caller (OpenWebUI, the orchestrator, or an MCP client) POSTs to <span class='what'>/tools/rag_search</span> with a natural-language query, a top-k count, and an optional corpus filter such as 'dailymed' or 'cdc'.",
+          "payload": "POST /tools/rag_search {query, top_k, corpus?}.",
+          "note": "src=medchat-mcp/src/medchat_mcp/routes.py:55"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "ollama",
+          "transport": "HTTP",
+          "narration": "medchat-mcp cannot search by meaning on its own &mdash; it needs a vector. It asks Ollama (the homelab embedder daemon) to produce one: POST <span class='what'>/api/embed</span> with model <span class='what'>qwen3-embedding:8b</span> returns a 4096-dimensional float vector. If Ollama is unreachable, medchat-mcp returns an empty ToolResult with <span class='what'>note='embed_unavailable'</span> rather than failing the whole turn.",
+          "payload": "POST /api/embed, model='qwen3-embedding:8b'.",
+          "note": "On timeout: ToolResult(note='embed_unavailable'). (src=medchat-mcp/src/medchat_mcp/tools/rag_search.py:30)"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "postgres",
+          "transport": "SQL",
+          "narration": "With the vector in hand, medchat-mcp runs a cosine-similarity search against the seeded corpus in PostgreSQL. The pgvector extension's <span class='what'>&lt;=&gt;</span> operator computes the distance between the query vector and each stored chunk's halfvec embedding. <span class='what'>ORDER BY ... LIMIT :k</span> returns the k closest matches.",
+          "payload": "ORDER BY embedding <=> halfvec(:qv) LIMIT :k from medchat_rag.chunk.",
+          "note": "src=medchat-mcp/src/medchat_mcp/tools/rag_search.py:64"
+        },
+        {
+          "from": "postgres",
+          "to": "medchat_mcp",
+          "transport": "rows",
+          "narration": "PostgreSQL hands back the top-k chunks, each with its cosine similarity score, source title, public URL, and corpus name.",
+          "payload": "Top-k rows from medchat_rag.chunk + medchat_rag.source.",
+          "note": "src=medchat-mcp/src/medchat_mcp/tools/rag_search.py:84"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "openwebui",
+          "transport": "POST resp",
+          "narration": "medchat-mcp wraps those rows into a ToolResult. Each chunk gets a citation marker like <span class='what'>[RAG:&lt;chunk_id&gt;]</span> so that citecheck can later validate any sentence that refers to it.",
+          "payload": "ToolResult with [RAG:<chunk_id>] markers.",
+          "note": "src=medchat-mcp/src/medchat_mcp/tools/rag_search.py:110"
+        }
+      ],
+      "name": "RAG search",
+      "color": "#ec4899",
+      "trigger": "user",
+      "tagline": "Embed the question, then find the nearest chunks in pgvector by cosine similarity. This flow is reused inside other flows whenever the model picks the rag_search tool.",
+      "glossary_terms": [
+        "pgvector",
+        "halfvec",
+        "cosine kNN",
+        "qwen3-embedding",
+        "Ollama"
+      ]
+    },
+    {
+      "id": "f6-attached-file",
+      "category": "user",
+      "title": "Attached file",
+      "narration": "medchat-mcp asks files-service for the snippets relevant to a previously uploaded document and forwards them back to OpenWebUI as a ToolResult.",
+      "steps": [
+        {
+          "from": "openwebui",
+          "to": "medchat_mcp",
+          "transport": "POST",
+          "narration": "When a user has uploaded a file, the model can call <span class='what'>attached_file_search</span>. OpenWebUI POSTs the file id, the query, and how many chunks to return.",
+          "payload": "POST /tools/attached_file_search {file_id, query, top_k}.",
+          "note": "src=medchat-mcp/src/medchat_mcp/routes.py:55"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "files",
+          "transport": "POST",
+          "narration": "medchat-mcp does not store the file or its embeddings &mdash; files-service does. medchat-mcp simply proxies the request: POST <span class='what'>{FILES_SERVICE_URL}/v1/files/{file_id}/retrieve</span>, authenticated with the per-service bearer token <span class='what'>FILES_SERVICE_TOKEN_MEDCHAT</span>.",
+          "payload": "POST /v1/files/{file_id}/retrieve with Bearer FILES_SERVICE_TOKEN_MEDCHAT.",
+          "note": "src=medchat-mcp/src/medchat_mcp/tools/attached_file.py:28"
+        },
+        {
+          "from": "files",
+          "to": "medchat_mcp",
+          "transport": "POST resp",
+          "narration": "files-service runs its own chunking and sqlite-vec retrieval on the uploaded document, then returns the top-k snippets. If the file id does not exist, the 404 becomes a soft <span class='what'>note='not found'</span>; if the token is wrong, the 401 or 403 becomes a degraded note. medchat-mcp never bubbles a 5xx error to the caller.",
+          "payload": "Top-k snippets. 404 -> note='not found'; 401/403 -> degraded.",
+          "note": "src=medchat-mcp/src/medchat_mcp/tools/attached_file.py:60"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "openwebui",
+          "transport": "POST resp",
+          "narration": "The snippets travel back to OpenWebUI as a ToolResult, ready for the model to read in its next round.",
+          "payload": "ToolResult.",
+          "note": "src=medchat-mcp/src/medchat_mcp/routes.py:78"
+        }
+      ],
+      "name": "Attached file",
+      "color": "#f43f5e",
+      "trigger": "user",
+      "tagline": "A user-uploaded document. medchat-mcp asks files-service for the relevant chunks.",
+      "glossary_terms": [
+        "files-service",
+        "sqlite-vec",
+        "ToolResult"
+      ]
+    },
+    {
+      "id": "f7-citecheck",
+      "category": "internal",
+      "title": "citecheck gate",
+      "narration": "Every cloud answer flows through citecheck: quiesce check, evidence-pack rebuild, marker resolution, observation update.",
+      "steps": [
+        {
+          "from": "medchat_mcp",
+          "to": "medchat_mcp",
+          "transport": "in-process",
+          "narration": "The cloud orchestrator has just produced a draft answer, and it is holding every tool result returned during this turn. Before the draft can reach the user, the orchestrator hands the bundle &mdash; <span class='what'>{draft_text, tool_results, ok_tools, failed_tools}</span> &mdash; to the citecheck egress gate.",
+          "payload": "{draft_text, tool_results, ok_tools, failed_tools}.",
+          "note": "src=medchat-mcp/src/medchat_mcp/citecheck.py:18"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "medchat_mcp",
+          "transport": "quiesce check",
+          "narration": "First, citecheck asks the in-memory auto-quiesce singleton whether the system is in degraded mode. If more than 15% of answers in the last 24 hours have been served as the safety stub, citecheck does not even look at the draft &mdash; it immediately returns the canned 'evidence incomplete' message. This is the failure-closed posture: medchat would rather say nothing than something it cannot back up.",
+          "payload": "cc.get_quiesce(). status='quiesced' -> stub.",
+          "note": "src=medchat-mcp/src/medchat_mcp/citecheck.py:48"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "medchat_mcp",
+          "transport": "resolve markers",
+          "narration": "If the gate is open, citecheck builds an EvidencePack from every tool result and walks the draft sentence by sentence. Any factual sentence that lacks a matching citation marker is stripped out. The remaining sentences form the cleaned output. A pack_hash is also computed, so the audit log can later prove which pieces of evidence were on hand for this turn.",
+          "payload": "EvidencePack.from_tool_results(...). check(...).",
+          "note": "src=medchat-mcp/src/medchat_mcp/citecheck.py:80"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "medchat_mcp",
+          "transport": "observe",
+          "narration": "Finally, citecheck observes the outcome. If a stub was used, the rolling 24-hour stub-rate ticks up. When that rate crosses 15%, auto-quiesce engages and every subsequent turn returns the stub until an operator manually calls <span class='what'>POST /admin/quiesce/reopen</span>.",
+          "payload": "q.observe(was_stub=res.stub_used).",
+          "note": "src=medchat-mcp/src/medchat_mcp/citecheck.py:120"
+        }
+      ],
+      "name": "citecheck gate",
+      "color": "#84cc16",
+      "trigger": "internal",
+      "tagline": "Every cloud answer passes through here. Strip uncited claims, count stubs, auto-quiesce if it gets bad.",
+      "glossary_terms": [
+        "citecheck",
+        "EvidencePack",
+        "stub",
+        "stub-rate",
+        "auto-quiesce"
+      ]
+    },
+    {
+      "id": "f8-verify",
+      "category": "internal",
+      "title": "Local verify",
+      "narration": "MedGemma reads the cleaned draft and votes per sentence; the verifier never calls tools. The result is written to the audit row.",
+      "steps": [
+        {
+          "from": "medchat_mcp",
+          "to": "medchat_mcp",
+          "transport": "POST /verify",
+          "narration": "After citecheck has cleaned the draft, the response builder invokes <span class='what'>/verify</span> on the same draft and the same tool results. This is a second, independent opinion before any reply leaves the server.",
+          "payload": "{draft_text, tool_results}.",
+          "note": "src=medchat-mcp/src/medchat_mcp/routes.py:140"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "llama",
+          "transport": "OpenAI API",
+          "narration": "medchat-mcp asks the local MedGemma model to read the draft alongside an evidence pack assembled from the turn's tool results. The system prompt tells MedGemma explicitly that it is a verifier &mdash; it must NOT rewrite anything, only score each sentence. The evidence pack is truncated to about 24,000 characters (roughly 6,000 tokens) so the prompt stays bounded.",
+          "payload": "model='medgemma-4b', system=VERIFIER_SYSTEM, draft + evidence pack (~24k char cap).",
+          "note": "src=medchat-mcp/src/medchat_mcp/tools/medgemma.py:24"
+        },
+        {
+          "from": "llama",
+          "to": "medchat_mcp",
+          "transport": "OpenAI API",
+          "narration": "MedGemma returns a JSON list with one entry per sentence: <span class='what'>{sentence_index, supported: true|false, reason: '...'}</span>. medchat-mcp parses this into VerifierVerdict objects.",
+          "payload": "JSON list [{sentence_index, supported, reason}].",
+          "note": "src=medchat-mcp/src/medchat_mcp/tools/medgemma.py:62"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "postgres",
+          "transport": "SQL",
+          "narration": "The verdicts are persisted on the audit row for this turn. The user-facing prose is never changed &mdash; verification is observation, not editing. This rule comes from ADR 0008: small models verifying is safe; small models rewriting is not.",
+          "payload": "INSERT into audit row.",
+          "note": "src=medchat-mcp/src/medchat_mcp/audit.py:34"
+        }
+      ],
+      "name": "Local verify",
+      "color": "#14b8a6",
+      "trigger": "internal",
+      "tagline": "Per ADR 0008: MedGemma is a verifier, never a tool. It only reads the cleaned draft and votes per sentence.",
+      "glossary_terms": [
+        "MedGemma",
+        "ADR 0008",
+        "verifier",
+        "evidence pack"
+      ]
+    },
+    {
+      "id": "f9-quiesce-reopen",
+      "category": "internal",
+      "title": "Admin reopen",
+      "narration": "After investigating, the operator POSTs to /admin/quiesce/reopen with the admin bearer token; the citecheck quiesce gate flips back to open.",
+      "steps": [
+        {
+          "from": "operator",
+          "to": "medchat_mcp",
+          "transport": "POST",
+          "narration": "When the operator has investigated an auto-quiesce and fixed the underlying problem, they reopen the gate by hand. The request is <span class='what'>POST /admin/quiesce/reopen</span> with header <span class='what'>Authorization: Bearer ${MEDCHAT_ADMIN_TOKEN}</span>. Without that token, the endpoint refuses.",
+          "payload": "POST /admin/quiesce/reopen, Authorization: Bearer ${MEDCHAT_ADMIN_TOKEN}.",
+          "note": "src=medchat-mcp/src/medchat_mcp/routes.py:200"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "medchat_mcp",
+          "transport": "in-process",
+          "narration": "medchat-mcp flips the in-process quiesce singleton from 'quiesced' back to 'open' and returns the new status along with the current stub-rate, so the operator can confirm the system is healthy again.",
+          "payload": "cc.get_quiesce().reopen() -> {status, stub_rate}.",
+          "note": "src=medchat-mcp/src/medchat_mcp/citecheck.py:96"
+        }
+      ],
+      "name": "Admin reopen",
+      "color": "#fb923c",
+      "trigger": "operator",
+      "tagline": "After investigating why auto-quiesce engaged, the operator manually reopens the safety gate so normal answers can flow again.",
+      "glossary_terms": [
+        "MEDCHAT_ADMIN_TOKEN",
+        "auto-quiesce"
+      ]
+    },
+    {
+      "id": "f10-audit-turn",
+      "category": "internal",
+      "title": "Audit turn",
+      "narration": "Every turn writes content_text and content_hash to medchat.turn in one statement; the nightly scrub will null content_text later.",
+      "steps": [
+        {
+          "from": "openwebui",
+          "to": "medchat_mcp",
+          "transport": "POST",
+          "narration": "After each turn, OpenWebUI is supposed to POST a complete audit record &mdash; conversation id, role (user or assistant), the raw <span class='what'>content_text</span>, the route used (local or cloud), token counts in and out, the tool calls made, and the <span class='what'>evidence_pack_hash</span> from citecheck. (Note: medchat-mcp implements the endpoint, but no in-repo OpenWebUI Function actually calls it yet &mdash; the glue is still TBD.)",
+          "payload": "{conversation_id, role, content_text, route, tokens, tool_calls, evidence_pack_hash}.",
+          "note": "src=medchat-mcp/src/medchat_mcp/routes.py:165"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "postgres",
+          "transport": "SQL",
+          "narration": "medchat-mcp inserts the row into <span class='what'>medchat.turn</span>. In the same INSERT statement, it also computes a SHA-256 hash of content_text and stores it in <span class='what'>content_hash</span>. This 'born together' rule is R4 in the TASKSPEC. Once the nightly scrub nulls content_text after 14 days, the hash still survives, so deduplication and integrity checks keep working.",
+          "payload": "INSERT INTO medchat.turn (...).",
+          "note": "src=medchat-mcp/src/medchat_mcp/audit.py:18"
+        }
+      ],
+      "name": "Audit turn",
+      "color": "#3b82f6",
+      "trigger": "user",
+      "tagline": "Every turn writes content_text and content_hash atomically. The nightly scrub will null content_text later; the hash survives.",
+      "glossary_terms": [
+        "content_text",
+        "content_hash",
+        "R4"
+      ]
+    },
+    {
+      "id": "f11-cron-ingest",
+      "category": "background",
+      "title": "Nightly ingest",
+      "narration": "Cron triggers the ingest container; it walks each corpus, skips unchanged chunks by content hash, embeds the new ones, and upserts rows in pgvector.",
+      "steps": [
+        {
+          "from": "cron",
+          "to": "operator",
+          "transport": "exec",
+          "narration": "At 03:00 every night, the host's cron daemon fires the ingest job. The command is <span class='what'>docker compose --profile ingest run --rm ingest python -m medchat_ingest delta-sync</span>, with all output redirected to <span class='what'>/var/log/medchat-ingest.log</span>.",
+          "payload": "docker compose --profile ingest run --rm ingest python -m medchat_ingest delta-sync.",
+          "note": "src=ops/crontab:4"
+        },
+        {
+          "from": "operator",
+          "to": "ingest",
+          "transport": "docker run",
+          "narration": "Docker spins up a fresh ingest container. The <span class='what'>ingest</span> compose profile keeps this container hidden from <span class='what'>docker compose up</span> &mdash; it only runs when cron asks for it. No restart, no healthcheck: it is single-shot by design.",
+          "payload": "Reads MEDCHAT_INGEST_CORPORA, MEDCHAT_INGEST_BATCH_SIZE.",
+          "note": "src=docker-compose.yml:165"
+        },
+        {
+          "from": "ingest",
+          "to": "ext_corpora",
+          "transport": "HTTPS GET",
+          "narration": "Inside the container, six per-corpus chunkers (DailyMed, USPSTF, CDC, NIH/NHLBI, AAFP, WHO) fetch documents over HTTPS. Each chunker yields a <span class='what'>SourceDoc</span> plus its split-up chunks. A configurable maximum-items-per-corpus keeps a runaway scrape from filling the disk.",
+          "payload": "Bounded by max-items-per-corpus.",
+          "note": "src=ingest/src/medchat_ingest/main.py:34"
+        },
+        {
+          "from": "ingest",
+          "to": "postgres",
+          "transport": "SQL SELECT",
+          "narration": "Before doing any expensive embedding work, ingest checks <span class='what'>needs_reembed(corpus, external_id, content_hash)</span> against PostgreSQL. If a document's content hash is unchanged from last run, the document is skipped entirely.",
+          "payload": "needs_reembed(corpus, external_id, content_hash).",
+          "note": "src=ingest/src/medchat_ingest/precondition.py:22"
+        },
+        {
+          "from": "ingest",
+          "to": "ollama",
+          "transport": "HTTP",
+          "narration": "For chunks that actually need new embeddings, ingest calls Ollama at <span class='what'>/api/embed</span> using <span class='what'>qwen3-embedding:8b</span>. This is the same model used at query time, which is what makes query vectors and chunk vectors comparable.",
+          "payload": "POST /api/embed, model='qwen3-embedding:8b'.",
+          "note": "src=ingest/src/medchat_ingest/embed.py:18"
+        },
+        {
+          "from": "ingest",
+          "to": "postgres",
+          "transport": "SQL UPSERT",
+          "narration": "The new chunks and their fresh embeddings are upserted into <span class='what'>medchat_rag.source</span> and <span class='what'>medchat_rag.chunk</span>. The query uses <span class='what'>INSERT ... ON CONFLICT DO UPDATE</span>, so running ingest twice in a row produces the same end state &mdash; the operation is idempotent.",
+          "payload": "Idempotent upsert into medchat_rag.source + medchat_rag.chunk.",
+          "note": "src=ingest/src/medchat_ingest/upsert.py:40"
+        },
+        {
+          "from": "ingest",
+          "to": "host_fs",
+          "transport": "stdout",
+          "narration": "Before exiting, ingest prints a JSON summary of what it did (chunks added, embeddings created, items skipped, errors encountered). cron captures the line into <span class='what'>/var/log/medchat-ingest.log</span>, and the container shuts down.",
+          "payload": "Appended to /var/log/medchat-ingest.log.",
+          "note": "src=ops/crontab:4"
+        }
+      ],
+      "name": "Nightly ingest",
+      "color": "#a855f7",
+      "trigger": "cron",
+      "tagline": "While you sleep, the corpus refreshes. New chunks get embedded; unchanged ones are skipped by content hash.",
+      "glossary_terms": [
+        "delta-sync",
+        "profile",
+        "chunker",
+        "content_hash",
+        "qwen3-embedding",
+        "Ollama",
+        "pgvector",
+        "idempotent upsert"
+      ]
+    },
+    {
+      "id": "f12-cron-scrub",
+      "category": "background",
+      "title": "Audit scrub",
+      "narration": "Cron triggers the audit scrub task; rows older than MEDCHAT_AUDIT_RETENTION_DAYS get content_text=NULL while their hashes survive.",
+      "steps": [
+        {
+          "from": "cron",
+          "to": "operator",
+          "transport": "exec",
+          "narration": "At 04:00 every night, cron fires the audit scrub. The command is <span class='what'>docker compose run --rm medchat-mcp python -m medchat_mcp.audit scrub</span>, with output redirected to <span class='what'>/var/log/medchat-scrub.log</span>.",
+          "payload": "docker compose run --rm medchat-mcp python -m medchat_mcp.audit scrub.",
+          "note": "src=ops/crontab:8"
+        },
+        {
+          "from": "operator",
+          "to": "medchat_mcp",
+          "transport": "docker run",
+          "narration": "Docker starts a throwaway medchat-mcp container. It uses the same image as the running sidecar, but instead of booting FastAPI it just runs the <span class='what'>cli_scrub()</span> function and exits.",
+          "payload": "MEDCHAT_AUDIT_RETENTION_DAYS=14.",
+          "note": "src=medchat-mcp/src/medchat_mcp/audit.py:78"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "postgres",
+          "transport": "SQL UPDATE",
+          "narration": "The scrub runs a single SQL UPDATE: every row in <span class='what'>medchat.turn</span> older than <span class='what'>MEDCHAT_AUDIT_RETENTION_DAYS</span> (default 14) has its <span class='what'>content_text</span> set to NULL. <span class='what'>medchat.feedback.note</span> gets the same treatment. The <span class='what'>content_hash</span> column is left untouched, so it survives as proof of what the row originally contained.",
+          "payload": "UPDATE medchat.turn SET content_text=NULL WHERE created_at < now() - interval '14 day'.",
+          "note": "src=medchat-mcp/src/medchat_mcp/audit.py:96"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "host_fs",
+          "transport": "stdout",
+          "narration": "The CLI prints a JSON summary of how many rows were scrubbed. cron appends the line to <span class='what'>/var/log/medchat-scrub.log</span>, and the container shuts down.",
+          "payload": "Appended to /var/log/medchat-scrub.log.",
+          "note": "src=ops/crontab:8"
+        }
+      ],
+      "name": "Audit scrub",
+      "color": "#6366f1",
+      "trigger": "cron",
+      "tagline": "Privacy chore. After 14 days, content_text becomes NULL. The hash stays.",
+      "glossary_terms": [
+        "retention",
+        "content_text",
+        "content_hash"
+      ]
+    },
+    {
+      "id": "f13-cron-vram",
+      "category": "background",
+      "title": "VRAM watch",
+      "narration": "Every minute, verify-ceiling.sh asks ROCm for resident VRAM and appends a JSON line; crossing the threshold creates a sentinel file the monitor watches.",
+      "steps": [
+        {
+          "from": "cron",
+          "to": "operator",
+          "transport": "exec",
+          "narration": "Every minute, cron runs the small shell script <span class='what'>ops/verify-ceiling.sh</span>. This is a plain script on the host &mdash; no Docker, no Python.",
+          "payload": "/home/peyman/projects/medchat/ops/verify-ceiling.sh.",
+          "note": "src=ops/crontab:12"
+        },
+        {
+          "from": "operator",
+          "to": "llama",
+          "transport": "rocm-smi",
+          "narration": "The script asks the AMD GPU directly: <span class='what'>rocm-smi --showmeminfo vram</span>. The number it returns is the resident VRAM in bytes, which in this setup is dominated by llama-server's model weights and KV cache.",
+          "payload": "rocm-smi --showmeminfo vram -> Used Memory bytes.",
+          "note": "src=ops/verify-ceiling.sh:18"
+        },
+        {
+          "from": "operator",
+          "to": "host_fs",
+          "transport": "fs",
+          "narration": "The script appends one JSON line per minute to <span class='what'>/var/log/medchat-vram.jsonl</span> in the form <span class='what'>{ts, used_gb, threshold_gb, alarm}</span>. If used_gb exceeds <span class='what'>MEDCHAT_VRAM_ALARM_GB</span> (default 19), the script touches <span class='what'>/tmp/medchat-alarm</span> &mdash; a sentinel file that the homelab monitor watches. If usage falls back under the threshold, the script removes the sentinel.",
+          "payload": "/var/log/medchat-vram.jsonl, /tmp/medchat-alarm. Threshold = MEDCHAT_VRAM_ALARM_GB.",
+          "note": "src=ops/verify-ceiling.sh:32"
+        }
+      ],
+      "name": "VRAM watch",
+      "color": "#eab308",
+      "trigger": "cron",
+      "tagline": "Every minute, a check. If VRAM crosses the threshold, the alarm sentinel appears.",
+      "glossary_terms": [
+        "rocm-smi",
+        "sentinel",
+        "MEDCHAT_VRAM_ALARM_GB"
+      ]
+    },
+    {
+      "id": "f14-deploy",
+      "category": "build",
+      "title": "Deploy",
+      "narration": "docker compose up --build --force-recreate; medchat-mcp's healthcheck gates OpenWebUI, then alembic upgrade head runs the migrations.",
+      "steps": [
+        {
+          "from": "operator",
+          "to": "medchat_mcp",
+          "transport": "docker build+run",
+          "narration": "The operator runs <span class='what'>docker compose up --build --force-recreate</span>. Compose builds the image <span class='what'>medchat/medchat-mcp:0.5.0</span> from <span class='what'>medchat-mcp/Dockerfile</span> and starts medchat-mcp first. The container listens on port 8001 and exposes a <span class='what'>/health</span> healthcheck that runs every 30 seconds.",
+          "payload": "Image medchat/medchat-mcp:0.5.0. healthcheck: GET /health.",
+          "note": "src=docker-compose.yml:75"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "postgres",
+          "transport": "SQL",
+          "narration": "On container startup, the FastAPI lifespan handler opens the async SQLAlchemy engine pointed at <span class='what'>MEDCHAT_DB_URL</span>. The healthcheck endpoint then runs a trivial <span class='what'>SELECT 1</span> against that engine, and only reports 'ok' once the database is reachable.",
+          "payload": "init_engine(cfg) + SELECT 1.",
+          "note": "src=medchat-mcp/src/medchat_mcp/db.py:20"
+        },
+        {
+          "from": "operator",
+          "to": "openwebui",
+          "transport": "docker run",
+          "narration": "OpenWebUI is started only after medchat-mcp's healthcheck reports healthy &mdash; this is the <span class='what'>depends_on: service_healthy</span> contract in docker-compose.yml. The order matters: open-webui registers medchat-mcp as a tool server at startup, and a tool server that does not exist yet would cause a noisy failure on boot.",
+          "payload": "depends_on: service_healthy.",
+          "note": "src=docker-compose.yml:55"
+        },
+        {
+          "from": "operator",
+          "to": "medchat_mcp",
+          "transport": "docker exec",
+          "narration": "Finally, the operator optionally runs <span class='what'>alembic upgrade head</span> inside the medchat-mcp container. Every medchat migration uses <span class='what'>IF NOT EXISTS</span> guards, so running upgrade head against an already-up-to-date schema is a safe no-op.",
+          "payload": "alembic upgrade head.",
+          "note": "src=medchat-mcp/alembic/env.py:24"
+        }
+      ],
+      "name": "Deploy",
+      "color": "#22c55e",
+      "trigger": "operator",
+      "tagline": "docker compose up --build --force-recreate. The healthcheck on medchat-mcp gates OpenWebUI.",
+      "glossary_terms": [
+        "depends_on",
+        "healthcheck",
+        "alembic"
+      ]
+    },
+    {
+      "id": "f15-setup-openwebui",
+      "category": "build",
+      "title": "OWUI setup",
+      "narration": "ops/setup-openwebui.sh signs in, discovers the model list, and writes the medical system prompt plus the medchat-mcp tool server connection.",
+      "steps": [
+        {
+          "from": "operator",
+          "to": "openwebui",
+          "transport": "POST",
+          "narration": "The setup script first authenticates against OpenWebUI. Either it POSTs the admin email and password to <span class='what'>/api/v1/auths/signin</span>, or it trusts a pre-issued <span class='what'>WEBUI_TOKEN</span>. Either way, it walks away with a bearer token that authorizes the rest of the calls.",
+          "payload": "POST /api/v1/auths/signin, or use WEBUI_TOKEN.",
+          "note": "src=ops/setup-openwebui.sh:30"
+        },
+        {
+          "from": "operator",
+          "to": "openwebui",
+          "transport": "GET",
+          "narration": "Using that token, the script calls <span class='what'>GET /api/models</span> to discover which model aliases OpenWebUI currently knows about. The list comes from the two OpenAI base URLs configured on the container &mdash; one pointing at llama-server (the resident model) and one at nexus-router (cloud Claude).",
+          "payload": "GET /api/models.",
+          "note": "src=ops/setup-openwebui.sh:78"
+        },
+        {
+          "from": "operator",
+          "to": "openwebui",
+          "transport": "POST",
+          "narration": "Finally, the script POSTs configuration: the medical-disclaimer system prompt is pulled from <span class='what'>ops/disclaimer-system-prompt.md</span> (skipping the YAML front matter), and medchat-mcp is registered as an OpenAPI tool server pointing at <span class='what'>http://medchat-mcp:8001</span>. After this script finishes once, the workspace is ready.",
+          "payload": "Updates workspace; TOOL_SERVER_CONNECTIONS pointed at http://medchat-mcp:8001.",
+          "note": "src=ops/setup-openwebui.sh:140"
+        }
+      ],
+      "name": "OWUI setup",
+      "color": "#38bdf8",
+      "trigger": "operator",
+      "tagline": "ops/setup-openwebui.sh signs in, configures the medical system prompt, registers the tool server.",
+      "glossary_terms": [
+        "WEBUI_TOKEN",
+        "TOOL_SERVER_CONNECTIONS"
+      ]
+    },
+    {
+      "id": "f16-download-model",
+      "category": "build",
+      "title": "Model download",
+      "narration": "ops/download-medgemma.sh pulls the Q4_K_M .gguf from HuggingFace into ./models, the directory shared with the sibling llama-server stack.",
+      "steps": [
+        {
+          "from": "operator",
+          "to": "huggingface",
+          "transport": "HTTPS",
+          "narration": "The operator runs <span class='what'>ops/download-medgemma.sh</span>, which downloads the MedGemma-4B-it weights from HuggingFace in the <span class='what'>Q4_K_M</span> quantization. Q4_K_M is a 4-bit k-quants build &mdash; small enough to fit comfortably in VRAM, accurate enough to be useful in medical context.",
+          "payload": "Q4_K_M .gguf download.",
+          "note": "src=ops/download-medgemma.sh:18"
+        },
+        {
+          "from": "operator",
+          "to": "host_fs",
+          "transport": "fs",
+          "narration": "The downloaded <span class='what'>.gguf</span> file lands in <span class='what'>./models</span>, which is bind-mounted into the sibling llama-server compose stack at <span class='what'>~/projects/llama-server</span>. medchat keeps exactly one resident model at a time; swapping models is a manual scheduled-maintenance step, never something the runtime does on its own.",
+          "payload": "Resident-model count is exactly one.",
+          "note": "src=ops/download-medgemma.sh:34"
+        }
+      ],
+      "name": "Model download",
+      "color": "#d946ef",
+      "trigger": "operator",
+      "tagline": "Download the resident model's weights once. The ./models directory is shared with the sibling llama-server stack, so both stacks see the same file.",
+      "glossary_terms": [
+        "gguf",
+        "Q4_K_M",
+        "MedGemma"
+      ]
+    },
+    {
+      "id": "f17-bench",
+      "category": "build",
+      "title": "Bench gate",
+      "narration": "Every TASKSPEC bench gate runs in order; missing the VRAM ceiling, the latency target, or the harness rate halts the ship.",
+      "steps": [
+        {
+          "from": "operator",
+          "to": "llama",
+          "transport": "HTTP",
+          "narration": "The day-one bench (<span class='what'>ops/medchat-bench.sh</span>) walks every TASKSPEC verification gate in order. It begins by asking llama-server to identify itself: <span class='what'>GET /health</span> to confirm it is alive, then <span class='what'>GET /v1/models</span> to confirm the expected model alias is being served.",
+          "payload": "GET /health, GET /v1/models.",
+          "note": "src=ops/medchat-bench.sh:24"
+        },
+        {
+          "from": "operator",
+          "to": "llama",
+          "transport": "rocm-smi",
+          "narration": "Next, the script reads resident GPU memory via <span class='what'>rocm-smi --showmeminfo vram</span>. The bench fails the build if usage is above the 18 GB ceiling. A related limit (ADR 0008) applies inside the inference container at 14 GB.",
+          "payload": "rocm-smi --showmeminfo vram.",
+          "note": "src=ops/medchat-bench.sh:40"
+        },
+        {
+          "from": "operator",
+          "to": "llama",
+          "transport": "OpenAI API",
+          "narration": "Now the actual performance probe. <span class='what'>ops/bench-tokps.py</span> sends test prompts through <span class='what'>/v1/chat/completions</span> and records two numbers: the median tokens-per-second during generation, and the time-to-first-token. Acceptable values are tok/s &ge; 35 and TTFT &le; 2.0 seconds.",
+          "payload": "ops/bench-tokps.py.",
+          "note": "src=ops/bench-tokps.py:18"
+        },
+        {
+          "from": "operator",
+          "to": "medchat_mcp",
+          "transport": "HTTP",
+          "narration": "On the medchat-mcp side, the script confirms the sidecar is healthy and that its database dependency reports 'ok'. Without a working database, audit writes would silently fail &mdash; that is a ship-blocker.",
+          "payload": "GET /health; dependencies.db must be 'ok'.",
+          "note": "src=ops/medchat-bench.sh:62"
+        },
+        {
+          "from": "operator",
+          "to": "nexus",
+          "transport": "harness",
+          "narration": "Finally, the cloud tool-call harness runs against nexus-router. It pushes 50 happy-path prompts plus at least 15 adversarial ones and grades whether the model chose the expected tool with the expected arguments. The bench fails if the pass-rate drops below 95%.",
+          "payload": "tests.tool_harness.runner --route cloud.",
+          "note": "src=medchat-mcp/tests/tool_harness/runner.py:20"
+        },
+        {
+          "from": "operator",
+          "to": "host_fs",
+          "transport": "fs",
+          "narration": "If every gate passes, the script appends a single row to <span class='what'>BENCHMARKS.md</span> recording the date and every measured metric. A missing row in BENCHMARKS.md is the audit trail's way of saying the bench refused to ship that build.",
+          "payload": "Append row {date, tok_per_sec, ttft, harness_rate, ...}.",
+          "note": "src=ops/medchat-bench.sh:88"
+        }
+      ],
+      "name": "Bench gate",
+      "color": "#ef4444",
+      "trigger": "operator",
+      "tagline": "Every TASKSPEC gate, end to end. >15% regression fails the ship.",
+      "glossary_terms": [
+        "tok/s",
+        "TTFT",
+        "VRAM ceiling",
+        "ADR 0008",
+        "rocm-smi"
+      ]
+    },
+    {
+      "id": "f18-tool-harness",
+      "category": "build",
+      "title": "Tool harness",
+      "narration": "tests.tool_harness.runner replays 50 happy-path and 15+ adversarial prompts; pass rate is graded on tool selection alone, not tool execution.",
+      "steps": [
+        {
+          "from": "operator",
+          "to": "medchat_mcp",
+          "transport": "docker run",
+          "narration": "The harness lives in <span class='what'>tests/tool_harness/runner.py</span>. The operator runs it inside a throwaway medchat-mcp container: <span class='what'>docker compose run --rm medchat-mcp python -m tests.tool_harness.runner --route cloud --prompts ops/tool-harness-prompts.json</span>.",
+          "payload": "docker compose run --rm medchat-mcp python -m tests.tool_harness.runner --route cloud.",
+          "note": "src=medchat-mcp/tests/tool_harness/runner.py:14"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "nexus",
+          "transport": "OpenAI API",
+          "narration": "For each prompt, the harness sends a single <span class='what'>/v1/chat/completions</span> call to nexus-router, attaching the full TOOL_DEFS catalogue. It grades only the model's tool selection &mdash; did it pick the expected tool, and do its arguments match the expected regex? Whether the upstream API actually succeeded is out of scope; that is covered by per-tool integration tests.",
+          "payload": "POST /v1/chat/completions with TOOL_DEFS.",
+          "note": "src=medchat-mcp/tests/tool_harness/runner.py:54"
+        },
+        {
+          "from": "medchat_mcp",
+          "to": "operator",
+          "transport": "stdout",
+          "narration": "When the harness finishes, it prints a JSON report with the total pass-rate, the per-tool pass-rate, and the per-prompt detail. The 95% ship gate is read straight from this number. The contract that at least three fresh adversarial prompts must rotate in each release is checked separately, by inspecting <span class='what'>ops/harness-adversarial-prompts.json</span>.",
+          "payload": "stdout JSON.",
+          "note": "src=medchat-mcp/tests/tool_harness/runner.py:88"
+        }
+      ],
+      "name": "Tool harness",
+      "color": "#94a3b8",
+      "trigger": "operator",
+      "tagline": "Grades tool selection, not execution. 50 happy-path + 15+ adversarial prompts.",
+      "glossary_terms": [
+        "TOOL_DEFS",
+        "tool selection",
+        "nexus-router",
+        "Claude Sonnet"
+      ]
+    }
+  ],
+  "glossary": {
+    "OIDC": "OpenID Connect. The auth protocol behind the medchat session cookie; the OIDC redirect URI is configured on OpenWebUI.",
+    "Cloudflare Tunnel": "An outbound connection from the homelab to Cloudflare's edge. Exposes medchat.peyman.io without opening any inbound ports.",
+    "Traefik": "The reverse proxy that routes Host=medchat.peyman.io to the open-webui container inside the platform-net Docker network.",
+    "platform-net": "Shared external Docker network. medchat-mcp and open-webui both attach to it, plus Traefik.",
+    "OpenAI API": "The OpenAI-compatible /v1/chat/completions HTTP shape. llama-server and nexus-router both speak it; OpenWebUI calls them through the same shape.",
+    "SSE": "Server-Sent Events. One-way streaming HTTP push used for both OpenAI streaming responses and the MCP /mcp endpoint.",
+    "strip_tool_chips": "OpenWebUI outlet filter that removes <details type='tool_calls'> blocks from assistant messages before they're rendered.",
+    "citation_links": "OpenWebUI outlet filter that rewrites markers like [PubMed:12345] into numbered hyperlinks and appends a Sources panel.",
+    "OpenAPI": "The auto-generated JSON schema FastAPI exposes at /openapi.json. OpenWebUI reads it to discover medchat-mcp's tool endpoints.",
+    "tool server": "OpenWebUI integration that reads a remote OpenAPI spec and offers its endpoints as model tools.",
+    "ToolResult": "medchat-mcp's normalized response shape: { results: [...], note?: '...' }. Tools never 5xx — degraded calls return an empty results list with a note.",
+    "TOOL_SERVER_CONNECTIONS": "Env on the open-webui container. Lists external OpenAPI tool servers to auto-register at startup.",
+    "PubMed": "The NCBI literature database. medchat-mcp's pubmed_search calls the E-utilities API.",
+    "NCBI E-utilities": "The HTTP search API for PubMed.",
+    "nexus-router": "External OpenAI-compatible cloud router. medchat-mcp posts /v1/chat/completions to it with model='claude-sonnet-4-6'.",
+    "Claude Sonnet": "claude-sonnet-4-6. The cloud LLM that runs the medchat-mcp tool-calling loop.",
+    "TOOL_DEFS": "OpenAI-style function definitions medchat-mcp passes to the cloud model so it can choose which tool to call.",
+    "citecheck": "The egress gate inside medchat-mcp. Resolves citation markers against the EvidencePack and strips uncited claims.",
+    "EvidencePack": "A per-turn collection of tool results that citecheck inspects to validate every claim in the draft.",
+    "stub": "The fallback 'evidence-incomplete' response served when citecheck cannot back up enough of the draft.",
+    "stub-rate": "Rolling 24-hour fraction of turns served as stubs. Above 15% triggers auto-quiesce.",
+    "auto-quiesce": "Failure-closed mode. While quiesced, citecheck always returns the stub until POST /admin/quiesce/reopen is called.",
+    "MCP": "Model Context Protocol. The standard for exposing tools to LLM clients. medchat-mcp serves /mcp via FastMCP SSE.",
+    "FastMCP": "Python framework for MCP servers used by medchat-mcp; mounted under /mcp.",
+    "pgvector": "PostgreSQL extension for vector similarity. medchat_rag.chunk.embedding is halfvec(4096).",
+    "halfvec": "pgvector's half-precision (float16) vector type. Used by medchat_rag to cut storage in half.",
+    "cosine kNN": "k-nearest-neighbor search by cosine similarity, expressed as ORDER BY embedding <=> halfvec(:qv).",
+    "qwen3-embedding": "The 8B-param embedding model running on the Ollama daemon. Produces 4096-d vectors.",
+    "Ollama": "Host-resident embedder daemon (port 11434). medchat-mcp and ingest both call its /api/embed endpoint.",
+    "files-service": "Separate service that stores user uploads and serves /v1/files/{id}/retrieve with its own sqlite-vec retrieval.",
+    "sqlite-vec": "Vector-search extension for SQLite; used inside files-service for per-file kNN.",
+    "MedGemma": "The 4B medical specialist model running on llama-server. Per ADR 0008, used only as a post-draft verifier.",
+    "ADR 0008": "Architecture decision: MedGemma is invisible to the cloud orchestrator. Triggered by the 2026-05-10 GPU fault.",
+    "verifier": "A pass that reads the cleaned draft and the evidence, votes per sentence, and never rewrites the prose.",
+    "evidence pack": "The truncated tool-results blob (~24k chars max, 6000 tokens) handed to the verifier.",
+    "MEDCHAT_ADMIN_TOKEN": "Required Bearer token to call /admin/quiesce/reopen. No token, no reopen.",
+    "content_hash": "SHA-256 over content_text. Survives the 14-day scrub so dedup and audits keep working.",
+    "content_text": "Raw turn text. Nulled by the nightly scrub after MEDCHAT_AUDIT_RETENTION_DAYS (default 14).",
+    "R4": "TASKSPEC rule: content_hash MUST be computed in the same insert that writes content_text.",
+    "delta-sync": "Ingest mode: re-fetch every corpus item but skip embedding when content_hash is unchanged.",
+    "profile": "Docker Compose profile [ingest]. Keeps the ingest service out of `docker compose up` by default.",
+    "chunker": "Per-corpus parser (dailymed.py, cdc.py, uspstf.py, ...) that yields SourceDoc + chunks.",
+    "idempotent upsert": "INSERT ... ON CONFLICT DO UPDATE. Running the same ingest twice produces the same row state.",
+    "retention": "MEDCHAT_AUDIT_RETENTION_DAYS, default 14. content_text older than this is nulled by the nightly scrub.",
+    "rocm-smi": "Command-line tool that reads AMD GPU stats. medchat polls VRAM with --showmeminfo vram.",
+    "sentinel": "/tmp/medchat-alarm. Touched when VRAM exceeds the ceiling; watched by homelab-monitor.",
+    "MEDCHAT_VRAM_ALARM_GB": "Threshold for the alarm sentinel; default 19 GB.",
+    "depends_on": "Docker Compose option. service_healthy form blocks startup until the upstream healthcheck reports healthy.",
+    "healthcheck": "Compose healthcheck on medchat-mcp pings /health every 30s.",
+    "alembic": "SQLAlchemy migration tool. All medchat migrations are idempotent (IF NOT EXISTS).",
+    "WEBUI_TOKEN": "An OpenWebUI API key. Alternative to admin email+password sign-in for the setup script.",
+    "gguf": "Quantized model file format used by llama.cpp. e.g. ./models/MedGemma-4B-it.Q4_K_M.gguf.",
+    "Q4_K_M": "Mid-sized 4-bit quantization. The MedGemma file used by llama-server.",
+    "tok/s": "Tokens per second produced by llama-server during generation.",
+    "TTFT": "Time to first token. The bench gate requires TTFT <= 2.0 s.",
+    "VRAM ceiling": "Resident VRAM limit checked by the bench gate. Above the threshold fails the ship.",
+    "tool selection": "The cloud harness grades only which tool the model picks, not whether the upstream API actually succeeds."
+  },
+  "actors": {
+    "user": {
+      "label": "User",
+      "tech": "browser"
+    },
+    "cf": {
+      "label": "Cloudflare",
+      "tech": "tunnel"
+    },
+    "traefik": {
+      "label": "Traefik",
+      "tech": "reverse proxy"
+    },
+    "openwebui": {
+      "label": "OpenWebUI",
+      "tech": "chat UI :8080"
+    },
+    "operator": {
+      "label": "operator",
+      "tech": "host shell"
+    },
+    "cron": {
+      "label": "host cron",
+      "tech": "scheduler"
+    },
+    "medchat_mcp": {
+      "label": "medchat-mcp",
+      "tech": "FastAPI :8001"
+    },
+    "ingest": {
+      "label": "ingest",
+      "tech": "batch worker"
+    },
+    "llama": {
+      "label": "llama-server",
+      "tech": "MedGemma-4B"
+    },
+    "nexus": {
+      "label": "nexus-router",
+      "tech": "Claude Sonnet"
+    },
+    "ollama": {
+      "label": "Ollama",
+      "tech": "qwen3-embedding"
+    },
+    "files": {
+      "label": "files-service",
+      "tech": "upload store"
+    },
+    "postgres": {
+      "label": "PostgreSQL",
+      "tech": "pgvector"
+    },
+    "ext_med_apis": {
+      "label": "medical APIs",
+      "tech": "PubMed, FDA, ..."
+    },
+    "ext_corpora": {
+      "label": "corpora",
+      "tech": "DailyMed, CDC, ..."
+    },
+    "huggingface": {
+      "label": "HuggingFace",
+      "tech": "model hub"
+    },
+    "host_fs": {
+      "label": "host disk",
+      "tech": "logs, sentinel"
+    }
+  },
+  "categories": [
+    {
+      "id": "user",
+      "title": "When a user asks a question",
+      "blurb": "Six paths a chat message can take, from a simple no-tools answer to a full cloud orchestrator with citation checking.",
+      "mood": "default"
+    },
+    {
+      "id": "internal",
+      "title": "Behind the scenes",
+      "blurb": "Internal gates, audit writes, and admin actions invoked by the orchestrator or the operator.",
+      "mood": "default"
+    },
+    {
+      "id": "background",
+      "title": "Scheduled jobs",
+      "blurb": "The three cron jobs that run themselves: nightly ingest, audit scrub, and a per-minute VRAM watch.",
+      "mood": "night"
+    },
+    {
+      "id": "build",
+      "title": "Deploy and setup",
+      "blurb": "Bringing the stack up, downloading the model, wiring OpenWebUI, running the bench gate.",
+      "mood": "build"
+    }
+  ]
+}
