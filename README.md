@@ -6,8 +6,11 @@
 
 ## Install
 
+In Claude Code, add the marketplace then install the plugin:
+
 ```
-claude-code plugin install codestory
+/plugin marketplace add phj6688/codestory
+/plugin install codestory@codestory
 ```
 
 ## Use

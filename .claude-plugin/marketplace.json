@@ -1,0 +1,14 @@
+{
+  "name": "codestory",
+  "owner": {
+    "name": "Peyman",
+    "email": "peyman.h.j@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "codestory",
+      "source": "./",
+      "description": "Turn any codebase into a beautifully animated book of workflows. Single HTML file."
+    }
+  ]
+}
