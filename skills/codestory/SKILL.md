@@ -283,7 +283,15 @@ Every `flow.narration`, `step.payload`, `step.note`, `flow.title`, and `flow.nam
 
 Mixed-language narrations (English next to German next to Farsi inside one HTML) are the most common scar in the field — they happen when the model rewrites a string without remembering the prior language pin. The skill MUST treat them as a save-blocking error, not a stylistic preference.
 
-**Pre-save language guard.** Before write, the skill samples every narration / payload / note string and flags any string whose dominant language differs from the run's chosen language. A trivial check is sufficient: run a script that counts characters in language-specific Unicode blocks (Latin-extended/A for German umlauts, Arabic for Farsi, CJK for Chinese, Cyrillic for Russian) plus a small high-frequency stopword grep (English: `the|and|of|to|with|for|when|that`; German: `der|die|das|und|nicht|mit|für|wird|ist`; Farsi: `که|این|آن|است|می|را`). Strings that score for a language other than the run's chosen one are rewritten before save, bounded to three passes per string. On non-convergence, the skill stops and asks the user to confirm the language pin.
+**Pre-save language guard.** Before write, the skill shells out to the bundled detector:
+
+```
+python3 ops/lang_guard.py --lang <chosen-code> --data <flows.json>
+```
+
+The detector exits 0 when every string scores as the chosen language and exits 1 with one JSON line per flagged string on stdout: `{"path": "flows[0].narration", "detected": "de", "want": "en", "text": "..."}`. For each flagged string the skill rewrites the narration / payload / note in the chosen language at the named `path`, then re-runs the detector. The loop is bounded to three passes per string; on non-convergence the skill stops and asks the user to confirm the language pin.
+
+The detector is stdlib-only (no model calls) and uses two signals: a Unicode-block ratio (Latin-Extended/A for German umlauts, Arabic for Farsi, CJK for Chinese, Cyrillic for Russian) plus a high-frequency stopword grep. Strings under four words are treated as on-language by default so short labels like `SQL INSERT` cannot misfire.
 
 Banned-phrase grep (below) runs over the rewritten strings, not the originals — language rewrites do not get a free pass on banned phrases.
 
@@ -539,16 +547,24 @@ Fields:
 
 ### Runtime sequence
 
-The capture step runs after Pass 3 (discovery is complete) and before the pre-write validators. The order is:
+The skill shells out to the bundled runner after Pass 3 (discovery is complete) and before the pre-write validators:
 
-1. Read `codestory.run` from `package.json` or `pyproject.toml`. If absent: skip the entire capture phase. No browser is launched.
-2. Run `start` as a backgrounded subprocess. Capture its PID.
-3. Poll the `ready` URL (or sleep `wait_ms`). If the readiness check times out at 30 seconds, the skill kills the subprocess, records a `screenshot_skipped: <reason>` entry in the discovery summary, and continues to write the HTML without screenshots.
-4. For each entry in `paths[]`, open `<url><path>` in a headless browser (Playwright is the bundled choice; if unavailable, the skill surfaces a "screenshots requested but Playwright not installed" warning and continues without screenshots).
-5. Set viewport `1440 × 900`. Wait for `networkidle`. Capture a PNG.
-6. Encode each PNG as a base64 data URI (so the HTML stays self-contained) and attach to the resolved step: `step.screenshot = "data:image/png;base64,..."` and `step.screenshotUrl = "<url><path>"`. The renderer auto-picks `viz: "screenshot"` when `step.screenshot` is set; the skill MAY override with another `viz` if it wants the image used as supporting context only.
-7. Send `SIGTERM` to the captured PID. Wait up to 10 seconds; on no exit, `SIGKILL`. Always run this cleanup even on capture failure.
-8. Append a `screenshots_captured: <count>` line to the discovery summary printed to the user.
+```
+python3 ops/capture.py --data <flows.json> --root <working-dir>
+```
+
+`ops/capture.py` enforces the contract end-to-end:
+
+1. Reads `codestory.run` from `package.json` or `pyproject.toml`. If absent: writes `capture: no codestory.run manifest block; skipping screenshots` to stderr and exits 0. No browser is launched.
+2. Tries to import `playwright`. If unavailable: writes a one-line install hint to stderr and exits 0. The /codestory run continues without screenshots — capture failure is non-fatal.
+3. Runs `start` as a backgrounded subprocess (own process group so the cleanup signal hits child workers too).
+4. Polls the `ready` URL (or sleeps `wait_ms`). On a 30 s readiness timeout the runner kills the subprocess and exits 0 without writing screenshots.
+5. For each `paths[]` entry, opens `<url><path>` in headless Chromium at viewport `1440 × 900` and waits for `networkidle`.
+6. Encodes each PNG as a base64 data URI (so the HTML stays self-contained) and attaches to the resolved step: `step.screenshot = "data:image/png;base64,..."`, `step.screenshotUrl = "<url><path>"`. The renderer auto-picks `viz: "screenshot"` when `step.screenshot` is set; the skill MAY override with another `viz` if it wants the image used as supporting context only.
+7. `SIGTERM`s the captured process group, waits up to 10 s, then `SIGKILL`s. Cleanup always runs, including on capture failure.
+8. Mutates the supplied `flows.json` in place when at least one screenshot was captured; otherwise leaves it untouched.
+
+The skill reads the runner's stderr and appends one line — `screenshots_captured: <count>` or the skip reason — to the discovery summary printed to the user.
 
 ### Size budget
 
@@ -656,9 +672,11 @@ The skill executes one `/codestory` invocation in this strict order. Each phase 
 7. **Categorise each flow.** Assign exactly one chapter (`user`, `internal`, `background`, `build`) by primary trigger. See §2 step 5.
 8. **Write narrations under the voice contract.** Active voice, subject-verb-object, 60-word soft cap per step, `<span class="who">` and `<span class="what">` markup for unit names and identifiers. See `references/narration-style.md`.
 9. **Pre-save banned-phrase grep.** Run the grep over every narration / payload / note. Rewrite any hit; bounded to three passes per string. See §4.
-10. **Coverage check.** Print the unknown count, the orphan unit list, and the flow count to the user. On 30+ flows, stop with the split-or-filter prompt. See §6.
-11. **Merge with prior state.** Apply the `(flow.id, step.index)` keyed merge from §5. Record stale entries to `.codestory-meta.json`.
-12. **Render and write.** Read `renderer/template.html` and the chosen theme CSS. Inject the data block into `<script id="codestory-data">`. Write the HTML to the resolved output path. On `--split`, write the sibling `.json`. Record the chosen theme name in an HTML comment near the top of the document.
+10. **Pre-save language guard.** Shell out to `python3 ops/lang_guard.py --lang <chosen-code> --data <flows.json>`. For every flagged path, rewrite the offending string in the chosen language and re-run; bounded to three passes per string. See §4.
+11. **Optional screenshot capture.** When `codestory.run` is declared in the working-dir manifest, shell out to `python3 ops/capture.py --data <flows.json> --root <working-dir>`. The runner mutates the flows.json in place. Skipped silently otherwise. See §8.5.
+12. **Coverage check.** Print the unknown count, the orphan unit list, and the flow count to the user. On 30+ flows, stop with the split-or-filter prompt. See §6.
+13. **Merge with prior state.** Apply the `(flow.id, step.index)` keyed merge from §5. Record stale entries to `.codestory-meta.json`.
+14. **Render and write.** Read `renderer/template.html` and the chosen theme CSS. Inject the data block into `<script id="codestory-data">`. Write the HTML to the resolved output path. On `--split`, write the sibling `.json`. Record the chosen theme name in an HTML comment near the top of the document.
 
 Each phase is observable: the skill prints a one-line trace per phase to the chat so the user sees progress and the budget remaining. A phase that stops the run prints the reason and the recommended next invocation (typically a `--scope` narrowing or a `--split` request).
 
