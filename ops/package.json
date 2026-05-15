@@ -1,0 +1,12 @@
+{
+  "name": "codestory-ops",
+  "private": true,
+  "description": "Dev-only tooling for the codestory renderer (smoke test).",
+  "type": "module",
+  "scripts": {
+    "test": "node test_renderer.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0"
+  }
+}

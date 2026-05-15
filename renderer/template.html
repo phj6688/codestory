@@ -1111,12 +1111,11 @@
 
   function renderScene() {
     clearScene();
-    if (currentScene === -1) { renderIntro(); annotateVizBadge("intro"); }
-    else if (currentScene >= currentFlow.steps.length) { renderOutro(); annotateVizBadge("outro"); }
-    else renderStep(currentFlow.steps[currentScene]);
-
     const sl = document.getElementById("step-label");
     const nar = document.getElementById("narration");
+    if (currentScene === -1) { renderIntro(); if (sl) sl.dataset.viz = "intro"; }
+    else if (currentScene >= currentFlow.steps.length) { renderOutro(); if (sl) sl.dataset.viz = "outro"; }
+    else renderStep(currentFlow.steps[currentScene]);
     if (currentScene === -1) {
       sl.textContent = `Chapter — ${currentCat.title}`;
       nar.innerHTML = `<span class="who">${escapeHtml(currentFlow.name || "")}</span> — ${escapeHtml(currentFlow.tagline || "")}`;
@@ -1173,17 +1172,28 @@
     if (step && step.viz) return step.viz;
     if (step && step.screenshot) return "screenshot";
     if (step && step.from === step.to) return "self";
-    const t = (step.transport || "").toLowerCase();
-    const p = (step.payload || "").toLowerCase();
-    const n = (step.note || "").toLowerCase();
-    const blob = t + " " + p + " " + n;
-    if (/\b(queue|celery|kafka|rabbit|sqs|publish|consume|enqueue|dequeue|topic|subscriber|pubsub|pub\/sub)\b/.test(blob)) return "queue";
-    if (/\b(broadcast|fan[- ]?out|notify all|websocket push|sse broadcast|emit to all)\b/.test(blob)) return "broadcast";
-    if (/\b(webhook|email|sms|push notification|notification|callback hook)\b/.test(blob)) return "notification";
-    if (/\b(insert|update|upsert|write|delete|create|persist|store)\b/.test(blob) && /\b(sql|db\b|database|table|row|record|postgres|mysql|sqlite|mongo|redis|cache)\b/.test(blob)) return "db-write";
-    if (/\b(select|read|query|fetch|lookup|get|load)\b/.test(blob) && /\b(sql|db\b|database|table|row|postgres|mysql|sqlite|mongo|redis|cache)\b/.test(blob)) return "db-read";
-    if (flow && flow.category === "build" && /\b(build|compile|bundle|transform|pipeline|stage|step)\b/.test(blob)) return "pipeline";
-    if (/\b(state|transition|status change|set status|advance)\b/.test(blob)) return "state";
+
+    // `transport` is the high-signal field (the wire shape). `payload` carries
+    // domain detail. `note` typically holds the file:line citation
+    // (`src=path/to/queue/handler.py:42`) which would false-match if scanned;
+    // strip `src=…` tokens before searching, and prefer transport.
+    const strip = (s) => String(s || "").toLowerCase().replace(/src=\S+/g, " ");
+    const t = strip(step.transport);
+    const p = strip(step.payload);
+
+    // SQL / KV / cache transport prefix — classify by verb alone. Payload
+    // names tables, not the noun "table".
+    if (/^(sql\b|postgres|mysql|sqlite|mongo|redis|cassandra|dynamodb|parquet|duckdb)/.test(t.trim())) {
+      if (/\b(insert|update|upsert|delete|write|persist|append|store|create|ddl)\b/.test(t + " " + p)) return "db-write";
+      if (/\b(select|read|query|fetch|lookup|get|load|match|find|scan)\b/.test(t + " " + p)) return "db-read";
+    }
+
+    if (/\b(queue|celery|kafka|rabbit|sqs|amqp|xadd|xread|arq|enqueue|dequeue|topic|pubsub|pub\/sub|publish|consume|subscriber)\b/.test(t)) return "queue";
+    if (/\b(broadcast|fan[- ]?out|notify all|websocket push|sse broadcast|emit to all)\b/.test(t + " " + p)) return "broadcast";
+    if (/\b(webhook|email|smtp|sms|push notification|notify|callback)\b/.test(t + " " + p)) return "notification";
+    if (flow && flow.category === "build" && /\b(build|compile|bundle|transform|pipeline|stage|phase|lint|test|migrate|boot|setup)\b/.test(t + " " + p)) return "pipeline";
+    if (/\b(state|transition|status change|set status|advance)\b/.test(t + " " + p)) return "state";
+    if (/[→]|->|=>/.test(p) && /\b(status|state|phase)\b/.test(p)) return "state";
     return "hop";
   }
 
@@ -1191,7 +1201,8 @@
     const root = document.getElementById("scene-content");
     const color = currentFlow.color;
     const viz = pickStepViz(step, currentFlow);
-    annotateVizBadge(viz);
+    const sl = document.getElementById("step-label");
+    if (sl) sl.dataset.viz = viz;
     switch (viz) {
       case "self":         return renderSelfScene(root, step, color);
       case "queue":        return renderQueueScene(root, step, color);
@@ -1207,11 +1218,6 @@
     }
   }
 
-  function annotateVizBadge(viz) {
-    const sl = document.getElementById("step-label");
-    if (!sl) return;
-    sl.dataset.viz = viz;
-  }
 
   function renderHopScene(root, step, color) {
     const fromA = actors[step.from] || { label: step.from, tech: "" };

@@ -1,0 +1,73 @@
+{
+  "project_name": "renderer-test",
+  "lead": "Fixture for the renderer smoke test — one step per viz type so a future edit cannot silently drop a case from the dispatcher.",
+  "actors": {
+    "client": { "label": "Client",  "tech": "browser" },
+    "api":    { "label": "API",     "tech": "FastAPI" },
+    "db":     { "label": "DB",      "tech": "Postgres" },
+    "queue":  { "label": "Queue",   "tech": "Redis" },
+    "worker": { "label": "Worker",  "tech": "arq" },
+    "ws":     { "label": "WS Hub",  "tech": "Socket.IO" },
+    "mailer": { "label": "Mailer",  "tech": "SMTP" },
+    "ci":     { "label": "CI",      "tech": "GitHub Actions" }
+  },
+  "units": [
+    { "id": "client", "kind": "app",     "label": "Client", "role": "x" },
+    { "id": "api",    "kind": "service", "label": "API",    "role": "x" },
+    { "id": "db",     "kind": "service", "label": "DB",     "role": "x" },
+    { "id": "queue",  "kind": "service", "label": "Queue",  "role": "x" },
+    { "id": "worker", "kind": "service", "label": "Worker", "role": "x" },
+    { "id": "ws",     "kind": "service", "label": "WS Hub", "role": "x" },
+    { "id": "mailer", "kind": "service", "label": "Mailer", "role": "x" },
+    { "id": "ci",     "kind": "service", "label": "CI",     "role": "x" }
+  ],
+  "categories": [
+    { "id": "user",       "title": "User",       "blurb": "", "mood": "default" },
+    { "id": "internal",   "title": "Internal",   "blurb": "", "mood": "default" },
+    { "id": "background", "title": "Background", "blurb": "", "mood": "night"   },
+    { "id": "build",      "title": "Build",      "blurb": "", "mood": "build"   }
+  ],
+  "flows": [
+    {
+      "id": "all-viz",
+      "name": "Every viz, one step each",
+      "title": "Every viz, one step each",
+      "category": "user",
+      "color": "var(--accent)",
+      "trigger": "test",
+      "tagline": "Each scene exercises one viz renderer.",
+      "narration": "The fixture exercises every step viz renderer in dispatch order.",
+      "steps": [
+        { "from": "client", "to": "api",    "transport": "HTTP POST", "payload": "POST /orders — src=test.py:1", "viz": "hop" },
+        { "from": "api",    "to": "api",    "transport": "tick",      "payload": "internal tick — src=test.py:2", "viz": "self" },
+        { "from": "api",    "to": "queue",  "transport": "XADD",      "payload": "publish job — src=test.py:3", "viz": "queue" },
+        { "from": "api",    "to": "ws",     "transport": "broadcast", "payload": "emit to all subscribers — src=test.py:4", "viz": "broadcast" },
+        { "from": "api",    "to": "mailer", "transport": "SMTP",      "payload": "send confirmation — src=test.py:5", "viz": "notification" },
+        { "from": "api",    "to": "db",     "transport": "SQL INSERT","payload": "INSERT INTO orders — src=test.py:6", "viz": "db-write" },
+        { "from": "worker", "to": "db",     "transport": "SQL SELECT","payload": "SELECT row by id — src=test.py:7", "viz": "db-read" },
+        { "from": "ci",     "to": "ci",     "transport": "build pipeline", "payload": "stages: lint → test → build — src=test.py:8", "viz": "pipeline" },
+        { "from": "api",    "to": "db",     "transport": "SQL UPDATE","payload": "status: new → confirmed — src=test.py:9", "viz": "state" },
+        { "from": "client", "to": "api",    "transport": "HTTP GET",  "payload": "captured UI — src=test.py:10", "viz": "screenshot", "screenshot": "data:image/svg+xml;base64,PHN2Zy8+", "screenshotUrl": "http://localhost/" }
+      ],
+      "glossary_refs": []
+    },
+    {
+      "id": "chooser-test",
+      "name": "Chooser without explicit viz",
+      "title": "Chooser without explicit viz",
+      "category": "internal",
+      "color": "var(--accent)",
+      "trigger": "test",
+      "tagline": "Each step omits `viz` and relies on the heuristic.",
+      "narration": "Steps below have no viz field; the renderer's chooser must pick the right one.",
+      "steps": [
+        { "from": "api",    "to": "db",     "transport": "SQL INSERT", "payload": "INSERT INTO orders VALUES (...) — src=test.py:11" },
+        { "from": "worker", "to": "db",     "transport": "SQL SELECT", "payload": "SELECT * FROM orders WHERE id = $1 — src=test.py:12" },
+        { "from": "api",    "to": "queue",  "transport": "XADD stream:orders", "payload": "publish job — src=test.py:13" },
+        { "from": "api",    "to": "mailer", "transport": "SMTP send",  "payload": "to=user@example.com — src=test.py:14" }
+      ],
+      "glossary_refs": []
+    }
+  ],
+  "glossary": {}
+}
