@@ -189,6 +189,7 @@ The skill writes a single `flows.json` (embedded inside `<script id="codestory-d
           "transport": "HTTP POST /v1/chat/completions",
           "payload": "Authorization: Bearer; body: { model, messages, stream } — src=config.yaml:8",
           "note": "host: \"\" and port: 18789 in config bind the listener inside the container.",
+          "viz": "hop",
           "unknown": false
         }
       ],
@@ -213,7 +214,7 @@ The skill writes a single `flows.json` (embedded inside `<script id="codestory-d
 - `actors` — non-empty object. Every step's `from` and `to` MUST be a key in `actors`.
 - `categories` — non-empty array with one entry per distinct value of `flow.category` actually used. The id must be one of `user`, `internal`, `background`, `build`. The `title` is the chapter headline shown on the home page; the `blurb` is the chapter description.
 - `flows[]` — non-empty array. Each flow has `id`, `name`, `category`, `narration`, `steps[]`.
-- Each `step` — `from`, `to`, `transport`, `payload` minimum. `note` optional. `unknown` only when the citation rule forces it (see Hard rule below).
+- Each `step` — `from`, `to`, `transport`, `payload` minimum. `note` optional. `unknown` only when the citation rule forces it (see Hard rule below). `viz` optional — see §3.1 below; absent means the renderer picks `hop` / `self` automatically.
 
 **Forbidden top-level keys:** `meta`, `lineRef`, `body`, `label`, `title` at the step level. These were the shapes the skill hallucinated in an early CLIproxyAPI run and are not part of the contract. The renderer ignores them.
 
@@ -229,6 +230,27 @@ Two permitted shapes:
 2. **Unknown step.** `unknown:true` AND `reason` is a sentence naming the file or signal that would resolve it. Example: `"Would confirm from services/orders/app/payments.py:42 if readable."`
 
 A step that lacks both shapes is a fabrication. The skill rewrites it into the unknown shape before saving. There is no third permitted shape.
+
+### 3.1 Picking `viz` (the per-step visualizer)
+
+Every step renders into a scene. The renderer ships ten visualizers; the skill picks the one that matches the step's shape so the user does not watch the same packet-on-arc animation N times per flow.
+
+The renderer auto-picks `hop` (cross-actor) or `self` (`from === to`) when `viz` is absent. For the other shapes, the skill MUST set `viz` explicitly:
+
+| `viz`          | When to pick it                                                                                              |
+|----------------|--------------------------------------------------------------------------------------------------------------|
+| `queue`        | Transport names a queue / pub-sub / stream: queue, celery, kafka, rabbit, sqs, redis pub/sub, AMQP topic     |
+| `broadcast`    | One sender, fan-out to many receivers. WebSocket broadcast, SSE-to-all, notify-all                            |
+| `notification` | Webhook, email, SMS, push notification — fire-and-forget side channels                                        |
+| `db-write`     | Insert / update / upsert / delete against a datastore (sql, mongo, redis-as-store)                            |
+| `db-read`      | Select / fetch / query against a datastore                                                                   |
+| `pipeline`     | Build / transform / compile chain; almost always `flow.category === "build"`                                  |
+| `state`        | State machine transition. Payload reads like `"draft" → "submitted"` or `status: new → confirmed`              |
+| `screenshot`   | UI step where the captured image is the point. Set automatically when `step.screenshot` is non-empty           |
+| `self`         | `from === to`. Set automatically; the skill may override with another viz where useful                         |
+| `hop`          | Anything else / cross-actor RPC. Default                                                                     |
+
+The skill does not invent new viz values. The renderer falls back to `hop` on an unknown viz, so a typo silently renders as a default packet animation instead of crashing. Run-time count: a healthy flow with N≥3 steps should use at least two distinct viz values; a flow that has all steps with the same viz is a signal that the skill should re-read the steps and pick more accurately.
 
 The pre-save check (run after step 6, before write):
 
@@ -250,6 +272,20 @@ for flow in flows:
 ## 4. Narration style
 
 The voice contract is in `references/narration-style.md`. That file declares the banned-phrase list. This skill's runtime job is to enforce it.
+
+### Mandate: one language per render
+
+Every `flow.narration`, `step.payload`, `step.note`, `flow.title`, and `flow.name` in a single output file MUST be written in **one** language. The default is English. The user opts in to a different language at the top of the run, never per-string:
+
+1. `--lang <code>` flag on the slash command (e.g. `--lang de`, `--lang fa`, `--lang en`).
+2. Repo manifest: `package.json` `"codestory": { "lang": "<code>" }` or `pyproject.toml` `[tool.codestory] lang = "<code>"`.
+3. Silent default: `en`.
+
+Mixed-language narrations (English next to German next to Farsi inside one HTML) are the most common scar in the field — they happen when the model rewrites a string without remembering the prior language pin. The skill MUST treat them as a save-blocking error, not a stylistic preference.
+
+**Pre-save language guard.** Before write, the skill samples every narration / payload / note string and flags any string whose dominant language differs from the run's chosen language. A trivial check is sufficient: run a script that counts characters in language-specific Unicode blocks (Latin-extended/A for German umlauts, Arabic for Farsi, CJK for Chinese, Cyrillic for Russian) plus a small high-frequency stopword grep (English: `the|and|of|to|with|for|when|that`; German: `der|die|das|und|nicht|mit|für|wird|ist`; Farsi: `که|این|آن|است|می|را`). Strings that score for a language other than the run's chosen one are rewritten before save, bounded to three passes per string. On non-convergence, the skill stops and asks the user to confirm the language pin.
+
+Banned-phrase grep (below) runs over the rewritten strings, not the originals — language rewrites do not get a free pass on banned phrases.
 
 ### Mandate: pre-save banned-phrase grep, rewrite-before-save
 
@@ -449,6 +485,82 @@ When `--split` is set, the data block is written to a sibling file with the same
 ### `--output <path>`
 
 Default: `./codestory.html` relative to the working directory. The path is created if it does not exist; the file is overwritten if it does — after the re-run merge described in §5 has folded prior hand-edits into the new output.
+
+---
+
+## 8.5 Opt-in screenshot capture
+
+A static-analysis tool cannot guess how to run an arbitrary repo. Screenshots are opt-in via a `codestory.run` manifest block. When that block is absent, the skill does not attempt to start the application, does not launch a browser, and does not enable the `screenshot` viz.
+
+### Manifest schema
+
+`package.json`:
+
+```json
+"codestory": {
+  "theme": "dark",
+  "run": {
+    "start": "npm run dev",
+    "url": "http://localhost:3000",
+    "ready": "GET /",
+    "wait_ms": 4000,
+    "paths": [
+      { "path": "/",        "step": "load-home"     },
+      { "path": "/login",   "step": "open-login"    },
+      { "path": "/items/1", "step": "view-item"     }
+    ]
+  }
+}
+```
+
+`pyproject.toml`:
+
+```toml
+[tool.codestory.run]
+start   = "uvicorn app.main:app --port 8000"
+url     = "http://localhost:8000"
+ready   = "GET /healthz"
+wait_ms = 4000
+paths   = [
+  { path = "/",         step = "load-home" },
+  { path = "/docs",     step = "open-docs" }
+]
+```
+
+Fields:
+
+- `start` — string, **required**. Shell command the skill runs to start the app. The user accepts the security and operational risk of running this; the skill does not infer or guess this command.
+- `url` — string, **required**. The base URL the headless browser opens.
+- `ready` — string, optional. A health check the skill polls before screenshotting; format `"<METHOD> <path>"`. A 2xx response means ready. Default: poll `start` survival + `wait_ms`.
+- `wait_ms` — integer, optional. Hard wait before screenshotting. Default 3000.
+- `paths[]` — array of `{ path, step }` objects.
+  - `path` — URL path relative to `url`. The skill opens `<url><path>`.
+  - `step` — the `flow.id` or `flow.id::step.index` to attach the screenshot to. When only `flow.id` is given, the screenshot attaches to the **first** step of that flow.
+
+### Runtime sequence
+
+The capture step runs after Pass 3 (discovery is complete) and before the pre-write validators. The order is:
+
+1. Read `codestory.run` from `package.json` or `pyproject.toml`. If absent: skip the entire capture phase. No browser is launched.
+2. Run `start` as a backgrounded subprocess. Capture its PID.
+3. Poll the `ready` URL (or sleep `wait_ms`). If the readiness check times out at 30 seconds, the skill kills the subprocess, records a `screenshot_skipped: <reason>` entry in the discovery summary, and continues to write the HTML without screenshots.
+4. For each entry in `paths[]`, open `<url><path>` in a headless browser (Playwright is the bundled choice; if unavailable, the skill surfaces a "screenshots requested but Playwright not installed" warning and continues without screenshots).
+5. Set viewport `1440 × 900`. Wait for `networkidle`. Capture a PNG.
+6. Encode each PNG as a base64 data URI (so the HTML stays self-contained) and attach to the resolved step: `step.screenshot = "data:image/png;base64,..."` and `step.screenshotUrl = "<url><path>"`. The renderer auto-picks `viz: "screenshot"` when `step.screenshot` is set; the skill MAY override with another `viz` if it wants the image used as supporting context only.
+7. Send `SIGTERM` to the captured PID. Wait up to 10 seconds; on no exit, `SIGKILL`. Always run this cleanup even on capture failure.
+8. Append a `screenshots_captured: <count>` line to the discovery summary printed to the user.
+
+### Size budget
+
+A base64-encoded PNG at `1440 × 900` runs roughly 200–400 KB. The skill keeps the total screenshot payload under **2 MB**; on overrun, it switches to `--split` mode automatically (the data block goes to a sibling `codestory.json`, and screenshots may be written as sibling files under `codestory.assets/<step-id>.png`). The skill records the split decision in the discovery summary.
+
+### Safety
+
+- The skill MUST NOT run `start` unless the user's manifest has a `codestory.run` block — declarative opt-in is the only switch.
+- The skill MUST NOT infer a start command from `package.json` scripts or common conventions; an absent block means no run.
+- The skill MUST NOT pass arbitrary URLs from outside the manifest to the browser; only `<url><path>` for declared paths.
+- The skill skips capture when the working directory has no manifest at all, regardless of `--screenshots`.
+- Errors during capture are **non-fatal**. The HTML still renders, just without those images. The skill never aborts the whole `/codestory` run because a screenshot failed.
 
 ---
 

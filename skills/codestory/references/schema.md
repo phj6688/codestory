@@ -106,6 +106,8 @@ A flow lives in exactly one chapter, picked by the primary trigger.
   "transport": "HTTP POST",
   "payload": "POST /v1/payments  Idempotency-Key=<order_id>  body: {amount, currency, source}",
   "note": "src=services/orders/app/payments.py:42",
+  "viz": "hop",
+  "screenshot": null,
   "unknown": false,
   "reason": null
 }
@@ -118,8 +120,30 @@ Fields:
 - `transport` — string, names the wire shape. Examples: `HTTP POST`, `HTTP GET`, `gRPC`, `SSE`, `WebSocket`, `SQL`, `AMQP publish`, `Kafka publish`, `docker exec`, `stdout`, `filesystem write`. One step, one transport.
 - `payload` — string, specific. Names the route or topic, the key headers (auth, idempotency, content-type), the key body fields. NOT a generic "request body".
 - `note` — string, optional. Free-text annotation. Typically used for the `file:line` citation (`src=path/to/file.py:42`) or a one-line explanation of a non-obvious choice.
+- `viz` — string, optional. Names the renderer to draw this step. One of `hop` (default cross-actor packet), `self` (loop back to source), `queue`, `broadcast`, `notification`, `db-write`, `db-read`, `pipeline`, `state`, `screenshot`. The renderer picks `hop` / `self` automatically when `viz` is absent; for the other shapes the skill MUST emit `viz` explicitly so the renderer does not fall back to a generic packet animation. `viz_type` is accepted as an alias for backward compatibility.
+- `screenshot` — string, optional. A data URI or relative path to an image of the affected UI for this step. When present, the renderer uses the `screenshot` viz unless `viz` is set to something else. Captured by the opt-in `codestory.run` flow (see SKILL.md §8.5).
+- `screenshotUrl` / `url` — string, optional. The URL shown in the mocked browser chrome above the screenshot.
 - `unknown` — bool, optional, default `false`. Set to `true` when the skill cannot confirm the step from a real source signal.
 - `reason` — string, required iff `unknown:true`. Names the file or signal that would resolve the unknown. Example: `"Would confirm from services/orders/app/payments.py if readable."`
+
+### Picking `viz` (chooser heuristic)
+
+Default behaviour (renderer fallback when `viz` is absent): `hop` if `from !== to`, `self` if `from === to`. The skill SHOULD set `viz` explicitly when the step matches one of the shapes below — otherwise every step renders as a packet-on-arc and the user sees the same animation N times per flow.
+
+| `viz`          | When to pick it                                                                                              |
+|----------------|--------------------------------------------------------------------------------------------------------------|
+| `queue`        | Transport names a queue / pub-sub / stream. Words: queue, celery, kafka, rabbit, sqs, topic, publish, consume |
+| `broadcast`    | One sender, fan-out to many receivers. WebSocket broadcast, SSE-to-all, notify-all                            |
+| `notification` | Webhook, email, SMS, push notification — fire-and-forget side channels                                        |
+| `db-write`     | Insert / update / upsert / delete against a datastore                                                         |
+| `db-read`      | Select / fetch / query against a datastore                                                                   |
+| `pipeline`     | Build / transform / compile chain (typically in the `build` chapter)                                           |
+| `state`        | State machine transition. Payload reads like `"draft" → "submitted"` or `status: new → confirmed`              |
+| `screenshot`   | UI step where the captured image is the point. Set automatically when `screenshot` field is present           |
+| `self`         | `from === to` (set automatically, but may be overridden)                                                       |
+| `hop`          | Anything else / cross-actor RPC. Default                                                                     |
+
+The renderer accepts unknown `viz` values by falling back to `hop`; consumers should not crash on a new viz type.
 
 ### Hard rule on citations
 

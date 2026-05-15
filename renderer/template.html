@@ -242,6 +242,18 @@
     color: var(--panel); border-color: var(--accent);
     background: var(--accent);
   }
+  .player-top .ctrl-btn[disabled],
+  .player-top .ctrl-btn[disabled]:hover {
+    opacity: 0.35;
+    cursor: not-allowed;
+    background: var(--panel);
+    color: var(--mute);
+    border-color: var(--line);
+  }
+  .player-top .nav-btn {
+    font-weight: 600;
+    min-width: 64px;
+  }
   .player-top .scene-count {
     color: var(--mute); font-size: 11px; min-width: 56px; text-align: right;
     font-family: var(--font-mono);
@@ -535,8 +547,10 @@
     <div class="view" id="v-player">
       <div class="player" id="player-root">
         <div class="player-top">
+          <button class="ctrl-btn nav-btn" id="btn-prev" title="previous scene (←)">‹ prev</button>
           <div class="progress-dots" id="dots"></div>
           <span class="scene-count" id="scene-count">1 / 1</span>
+          <button class="ctrl-btn nav-btn" id="btn-next" title="next scene (→)">next ›</button>
           <button class="ctrl-btn" id="btn-mode" title="overview / scenes (O)">overview</button>
           <button class="ctrl-btn" id="btn-replay" title="restart (R)">replay</button>
           <button class="ctrl-btn" id="btn-pause" title="pause/play (space)">pause</button>
@@ -666,7 +680,14 @@
       if (!s) return;
       if (!s.narration && s.body) s.narration = s.body;
       if (!s.payload && s.title) s.payload = s.title;
+      // viz_type → viz alias (schema permits both).
+      if (!s.viz && s.viz_type) s.viz = s.viz_type;
     }));
+    // flow.glossary_refs → glossary_terms alias (schema permits both).
+    (d.flows || []).forEach(f => {
+      if (!f) return;
+      if (!f.glossary_terms && Array.isArray(f.glossary_refs)) f.glossary_terms = f.glossary_refs;
+    });
     return d;
   }
 
@@ -806,6 +827,7 @@
     if (dots) dots.style.visibility = playerMode === "overview" ? "hidden" : "visible";
     const sc = document.getElementById("scene-count");
     if (sc) sc.style.visibility = playerMode === "overview" ? "hidden" : "visible";
+    updateNavButtons();
   }
 
   // HOME — build via DOM, no innerHTML with untrusted text
@@ -1089,8 +1111,8 @@
 
   function renderScene() {
     clearScene();
-    if (currentScene === -1) renderIntro();
-    else if (currentScene >= currentFlow.steps.length) renderOutro();
+    if (currentScene === -1) { renderIntro(); annotateVizBadge("intro"); }
+    else if (currentScene >= currentFlow.steps.length) { renderOutro(); annotateVizBadge("outro"); }
     else renderStep(currentFlow.steps[currentScene]);
 
     const sl = document.getElementById("step-label");
@@ -1111,6 +1133,7 @@
       nar.innerHTML = sanitizeNarration(step.narration || `${(actors[step.from] || {}).label || step.from} talks to ${(actors[step.to] || {}).label || step.to}.`);
     }
     updateDotProgress(0);
+    updateNavButtons();
   }
 
   function fadeIn(node, delay = 0, duration = 500) {
@@ -1146,12 +1169,48 @@
     root.appendChild(el("text", { x: cx, y: y + 180, class: "title-cta", text: "← back, or pick another story" }));
   }
 
+  function pickStepViz(step, flow) {
+    if (step && step.viz) return step.viz;
+    if (step && step.screenshot) return "screenshot";
+    if (step && step.from === step.to) return "self";
+    const t = (step.transport || "").toLowerCase();
+    const p = (step.payload || "").toLowerCase();
+    const n = (step.note || "").toLowerCase();
+    const blob = t + " " + p + " " + n;
+    if (/\b(queue|celery|kafka|rabbit|sqs|publish|consume|enqueue|dequeue|topic|subscriber|pubsub|pub\/sub)\b/.test(blob)) return "queue";
+    if (/\b(broadcast|fan[- ]?out|notify all|websocket push|sse broadcast|emit to all)\b/.test(blob)) return "broadcast";
+    if (/\b(webhook|email|sms|push notification|notification|callback hook)\b/.test(blob)) return "notification";
+    if (/\b(insert|update|upsert|write|delete|create|persist|store)\b/.test(blob) && /\b(sql|db\b|database|table|row|record|postgres|mysql|sqlite|mongo|redis|cache)\b/.test(blob)) return "db-write";
+    if (/\b(select|read|query|fetch|lookup|get|load)\b/.test(blob) && /\b(sql|db\b|database|table|row|postgres|mysql|sqlite|mongo|redis|cache)\b/.test(blob)) return "db-read";
+    if (flow && flow.category === "build" && /\b(build|compile|bundle|transform|pipeline|stage|step)\b/.test(blob)) return "pipeline";
+    if (/\b(state|transition|status change|set status|advance)\b/.test(blob)) return "state";
+    return "hop";
+  }
+
   function renderStep(step) {
     const root = document.getElementById("scene-content");
     const color = currentFlow.color;
-    const isSelf = step.from === step.to;
-    if (isSelf) renderSelfScene(root, step, color);
-    else renderHopScene(root, step, color);
+    const viz = pickStepViz(step, currentFlow);
+    annotateVizBadge(viz);
+    switch (viz) {
+      case "self":         return renderSelfScene(root, step, color);
+      case "queue":        return renderQueueScene(root, step, color);
+      case "broadcast":    return renderBroadcastScene(root, step, color);
+      case "notification": return renderNotificationScene(root, step, color);
+      case "db-write":     return renderDbScene(root, step, color, "write");
+      case "db-read":      return renderDbScene(root, step, color, "read");
+      case "pipeline":     return renderPipelineScene(root, step, color);
+      case "state":        return renderStateScene(root, step, color);
+      case "screenshot":   return renderScreenshotScene(root, step, color);
+      case "hop":
+      default:             return renderHopScene(root, step, color);
+    }
+  }
+
+  function annotateVizBadge(viz) {
+    const sl = document.getElementById("step-label");
+    if (!sl) return;
+    sl.dataset.viz = viz;
   }
 
   function renderHopScene(root, step, color) {
@@ -1230,6 +1289,372 @@
       pingActor(cardG, color);
       drawSpeechBubble(speechG, cx - 240, cy + cardH/2 + 24, 480, step.payload || "", color, step.note, step.unknown ? (step.unknownReason || step.reason) : null);
     }), 300);
+  }
+
+  // QUEUE SCENE — producer on the left, consumer on the right, message buffer between
+  function renderQueueScene(root, step, color) {
+    const fromA = actors[step.from] || { label: step.from, tech: "" };
+    const toA = actors[step.to] || { label: step.to, tech: "" };
+    const fromCx = 220, toCx = 980, cy = 320;
+    const cardW = 200, cardH = 90;
+    const fromG = makeActorCard(fromCx, cy, cardW, cardH, fromA, color);
+    const toG   = makeActorCard(toCx,   cy, cardW, cardH, toA,   color);
+    root.appendChild(fromG);
+    root.appendChild(toG);
+
+    const qx = 480, qy = cy - 70, qw = 240, qh = 140;
+    root.appendChild(el("rect", { x: qx, y: qy, width: qw, height: qh, rx: 8, fill: "var(--panel-2)", stroke: color, "stroke-width": 1.5 }));
+    root.appendChild(el("text", { x: qx + qw/2, y: qy - 8, "text-anchor": "middle", fill: color, "font-size": 11, "font-family": "ui-monospace, monospace", text: (step.transport || "queue").toUpperCase() }));
+    // pre-populated msgs
+    const msgCount = 4;
+    for (let i = 0; i < msgCount; i++) {
+      root.appendChild(el("rect", { x: qx + 14, y: qy + qh - 24 - i * 22, width: qw - 28, height: 18, rx: 3, fill: "var(--bg)", stroke: color, "stroke-width": 1, opacity: 1 - i * 0.18 }));
+      root.appendChild(el("text", { x: qx + 22, y: qy + qh - 11 - i * 22, fill: "var(--mute)", "font-size": 10, "font-family": "ui-monospace, monospace", text: "msg #" + (msgCount - i) }));
+    }
+    // payload label below queue
+    const payload = step.payload || "";
+    const truncated = payload.length > 86 ? payload.slice(0, 84) + "…" : payload;
+    root.appendChild(el("text", { x: qx + qw/2, y: qy + qh + 22, "text-anchor": "middle", fill: "var(--mute)", "font-size": 11, "font-family": "ui-monospace, monospace", text: truncated }));
+
+    // producer flying msg in
+    const pkt = el("g");
+    pkt.appendChild(el("circle", { r: 14, fill: "url(#packetGlow)", opacity: "0.6" }));
+    pkt.appendChild(el("rect", { x: -10, y: -7, width: 20, height: 14, rx: 2, fill: "var(--packet)", class: "packet-shape" }));
+    pkt.setAttribute("transform", `translate(${fromCx + cardW/2}, ${cy})`);
+    root.appendChild(pkt);
+    const arcIn = arcPath(fromCx + cardW/2, cy, qx + 24, qy + qh - 14, -90);
+    root.appendChild(el("path", { d: arcIn, class: "arc", stroke: color }));
+    // consumer pulling msg out
+    const pkt2 = el("g");
+    pkt2.appendChild(el("circle", { r: 14, fill: "url(#packetGlow)", opacity: "0.6" }));
+    pkt2.appendChild(el("rect", { x: -10, y: -7, width: 20, height: 14, rx: 2, fill: "var(--packet)", class: "packet-shape" }));
+    pkt2.setAttribute("transform", `translate(${qx + qw - 24}, ${qy + 8})`);
+    pkt2.setAttribute("opacity", "0");
+    root.appendChild(pkt2);
+    const arcOut = arcPath(qx + qw - 24, qy + 8, toCx - cardW/2, cy, -90);
+    root.appendChild(el("path", { d: arcOut, class: "arc", stroke: color }));
+
+    setTimeout(() => animatePacket(pkt, arcIn, packetHopMs, () => {
+      pkt.setAttribute("opacity", "0");
+      pkt2.setAttribute("opacity", "1");
+      setTimeout(() => animatePacket(pkt2, arcOut, packetHopMs, () => {
+        pingActor(toG, color);
+      }), 200);
+    }), 250);
+  }
+
+  // BROADCAST — one source, three targets
+  function renderBroadcastScene(root, step, color) {
+    const fromA = actors[step.from] || { label: step.from, tech: "" };
+    const toA = actors[step.to] || { label: step.to, tech: "" };
+    const fromCx = 240, fromCy = 320;
+    const cardW = 220, cardH = 96;
+    root.appendChild(makeActorCard(fromCx, fromCy, cardW, cardH, fromA, color));
+
+    // three receivers stacked on the right
+    const rCx = 920, rW = 180, rH = 60, gap = 24;
+    const totalH = rH * 3 + gap * 2;
+    const startY = fromCy - totalH / 2 + rH / 2;
+    const receivers = [];
+    for (let i = 0; i < 3; i++) {
+      const cy = startY + i * (rH + gap);
+      const r = makeActorCard(rCx, cy, rW, rH, { label: i === 0 ? (toA.label || step.to) : "subscriber " + (i + 1), tech: i === 0 ? (toA.tech || "") : "" }, color);
+      receivers.push({ g: r, cx: rCx, cy });
+      root.appendChild(r);
+    }
+    receivers.forEach((rcv, i) => {
+      const arcD = arcPath(fromCx + cardW/2, fromCy, rcv.cx - rW/2, rcv.cy, -40 + i * 0);
+      root.appendChild(el("path", { d: arcD, class: "arc", stroke: color }));
+      const pkt = el("g");
+      pkt.appendChild(el("circle", { r: 14, fill: "url(#packetGlow)", opacity: "0.6" }));
+      pkt.appendChild(el("circle", { r: 6, fill: "var(--packet)", class: "packet-shape" }));
+      pkt.setAttribute("transform", `translate(${fromCx + cardW/2}, ${fromCy})`);
+      root.appendChild(pkt);
+      setTimeout(() => animatePacket(pkt, arcD, packetHopMs + i * 200, () => pingActor(rcv.g, color)), 300 + i * 220);
+    });
+    // payload pill
+    const pillText = step.transport || "broadcast";
+    const pillW = pillText.length * 7 + 28;
+    root.appendChild(el("rect", { x: 600 - pillW/2, y: fromCy - 200, width: pillW, height: 24, rx: 12, class: "transport-pill-bg", stroke: color }));
+    root.appendChild(el("text", { x: 600, y: fromCy - 184, class: "transport-pill-text", fill: color, text: pillText }));
+    // speech below
+    const speechG = el("g");
+    root.appendChild(speechG);
+    setTimeout(() => drawSpeechBubble(speechG, fromCx + cardW/2 + 20, fromCy + cardH/2 + 32, 380, step.payload || "", color, step.note, step.unknown ? (step.unknownReason || step.reason) : null), packetHopMs + 800);
+  }
+
+  // NOTIFICATION — envelope flies, chime ring on arrival
+  function renderNotificationScene(root, step, color) {
+    const fromA = actors[step.from] || { label: step.from, tech: "" };
+    const toA = actors[step.to] || { label: step.to, tech: "" };
+    const fromCx = 280, toCx = 920, cy = 320;
+    const cardW = 240, cardH = 96;
+    const fromG = makeActorCard(fromCx, cy, cardW, cardH, fromA, color);
+    const toG = makeActorCard(toCx, cy, cardW, cardH, toA, color);
+    root.appendChild(fromG); root.appendChild(toG);
+
+    const arcD = arcPath(fromCx + cardW/2 - 10, cy, toCx - cardW/2 + 10, cy, -110);
+    root.appendChild(el("path", { d: arcD, class: "arc", stroke: color }));
+
+    // envelope packet
+    const pkt = el("g");
+    pkt.appendChild(el("rect", { x: -16, y: -10, width: 32, height: 20, rx: 2, fill: "var(--panel)", stroke: color, "stroke-width": 1.5 }));
+    pkt.appendChild(el("path", { d: "M -16 -10 L 0 4 L 16 -10", fill: "none", stroke: color, "stroke-width": 1.5 }));
+    pkt.setAttribute("transform", `translate(${fromCx + cardW/2 - 10}, ${cy})`);
+    root.appendChild(pkt);
+
+    const pillText = step.transport || "notify";
+    const pillW = pillText.length * 7 + 28;
+    root.appendChild(el("rect", { x: 600 - pillW/2, y: cy - 140, width: pillW, height: 24, rx: 12, class: "transport-pill-bg", stroke: color }));
+    root.appendChild(el("text", { x: 600, y: cy - 124, class: "transport-pill-text", fill: color, text: pillText }));
+
+    setTimeout(() => animatePacket(pkt, arcD, packetHopMs, () => {
+      // chime ripple on toG
+      const ring = el("circle", { cx: toCx, cy: cy, r: 60, fill: "none", stroke: color, "stroke-width": 2, opacity: 0.7 });
+      root.appendChild(ring);
+      const t0 = performance.now();
+      function rip(now) {
+        const t = Math.min(1, (now - t0) / 700);
+        ring.setAttribute("r", 60 + t * 60);
+        ring.setAttribute("opacity", 0.7 * (1 - t));
+        if (t < 1) requestAnimationFrame(rip);
+        else ring.remove();
+      }
+      requestAnimationFrame(rip);
+      pingActor(toG, color);
+      const speechG = el("g");
+      root.appendChild(speechG);
+      drawSpeechBubble(speechG, toCx - 220, cy + cardH/2 + 24, 440, step.payload || "", color, step.note, step.unknown ? (step.unknownReason || step.reason) : null);
+    }), 300);
+  }
+
+  // DB SCENE — direction: "read" or "write". Table icon on right.
+  function renderDbScene(root, step, color, direction) {
+    const fromA = actors[step.from] || { label: step.from, tech: "" };
+    const toA = actors[step.to] || { label: step.to, tech: "" };
+    const fromCx = 260, dbCx = 920, cy = 320;
+    const cardW = 220, cardH = 96;
+    root.appendChild(makeActorCard(fromCx, cy, cardW, cardH, fromA, color));
+
+    // table icon
+    const tx = dbCx - 120, ty = cy - 90, tw = 240, th = 180;
+    const tableG = el("g");
+    tableG.appendChild(el("rect", { x: tx, y: ty, width: tw, height: th, rx: 6, fill: "var(--panel)", stroke: color, "stroke-width": 1.5 }));
+    tableG.appendChild(el("rect", { x: tx, y: ty, width: tw, height: 26, rx: 6, fill: "var(--panel-2)", stroke: color, "stroke-width": 1.5 }));
+    tableG.appendChild(el("text", { x: tx + tw/2, y: ty + 17, "text-anchor": "middle", fill: color, "font-size": 11, "font-weight": 700, "font-family": "ui-monospace, monospace", text: (toA.label || step.to).toUpperCase() }));
+    // rows
+    const rowCount = 5;
+    for (let i = 0; i < rowCount; i++) {
+      tableG.appendChild(el("line", { x1: tx + 10, y1: ty + 40 + i * 26, x2: tx + tw - 10, y2: ty + 40 + i * 26, stroke: "var(--line)", "stroke-width": 1 }));
+      tableG.appendChild(el("rect", { x: tx + 14, y: ty + 44 + i * 26, width: 80, height: 8, rx: 2, fill: "var(--line)" }));
+      tableG.appendChild(el("rect", { x: tx + 102, y: ty + 44 + i * 26, width: 60, height: 8, rx: 2, fill: "var(--line)", opacity: 0.6 }));
+      tableG.appendChild(el("rect", { x: tx + 168, y: ty + 44 + i * 26, width: 50, height: 8, rx: 2, fill: "var(--line)", opacity: 0.4 }));
+    }
+    root.appendChild(tableG);
+
+    const pillText = step.transport || (direction === "write" ? "INSERT" : "SELECT");
+    const pillW = pillText.length * 7 + 28;
+    root.appendChild(el("rect", { x: (fromCx + dbCx)/2 - pillW/2, y: cy - 150, width: pillW, height: 24, rx: 12, class: "transport-pill-bg", stroke: color }));
+    root.appendChild(el("text", { x: (fromCx + dbCx)/2, y: cy - 134, class: "transport-pill-text", fill: color, text: pillText }));
+
+    const arcOut = arcPath(fromCx + cardW/2, cy, tx + tw/2, ty + th - 20, -100);
+    root.appendChild(el("path", { d: arcOut, class: "arc", stroke: color }));
+
+    const pkt = el("g");
+    pkt.appendChild(el("circle", { r: 14, fill: "url(#packetGlow)", opacity: "0.6" }));
+    pkt.appendChild(el("circle", { r: 7, class: "packet-shape", fill: "var(--packet)" }));
+    pkt.setAttribute("transform", `translate(${fromCx + cardW/2}, ${cy})`);
+    root.appendChild(pkt);
+
+    setTimeout(() => animatePacket(pkt, arcOut, packetHopMs, () => {
+      pkt.remove();
+      if (direction === "write") {
+        // highlight new row
+        const newRow = el("rect", { x: tx + 10, y: ty + th - 24, width: tw - 20, height: 18, rx: 3, fill: color, opacity: 0 });
+        tableG.appendChild(newRow);
+        let v = 0;
+        const fade = () => { v = Math.min(0.45, v + 0.05); newRow.setAttribute("opacity", v); if (v < 0.45) requestAnimationFrame(fade); };
+        requestAnimationFrame(fade);
+      } else {
+        // highlight a row and bounce back
+        const idx = 2;
+        const hi = el("rect", { x: tx + 10, y: ty + 40 + idx * 26 + 1, width: tw - 20, height: 24, rx: 3, fill: color, opacity: 0.35 });
+        tableG.appendChild(hi);
+        const arcBack = arcPath(tx + tw/2, ty + 40 + idx * 26 + 12, fromCx + cardW/2, cy, -100);
+        root.appendChild(el("path", { d: arcBack, class: "arc", stroke: color }));
+        const pkt2 = el("g");
+        pkt2.appendChild(el("circle", { r: 14, fill: "url(#packetGlow)", opacity: "0.6" }));
+        pkt2.appendChild(el("circle", { r: 7, class: "packet-shape", fill: "var(--packet)" }));
+        pkt2.setAttribute("transform", `translate(${tx + tw/2}, ${ty + 40 + idx * 26 + 12})`);
+        root.appendChild(pkt2);
+        setTimeout(() => animatePacket(pkt2, arcBack, packetHopMs, () => { pkt2.remove(); }), 350);
+      }
+      const speechG = el("g");
+      root.appendChild(speechG);
+      drawSpeechBubble(speechG, fromCx + cardW/2 + 20, cy + cardH/2 + 24, 420, step.payload || "", color, step.note, step.unknown ? (step.unknownReason || step.reason) : null);
+    }), 300);
+  }
+
+  // PIPELINE — three stages in series, packet morphs colour as it passes each
+  function renderPipelineScene(root, step, color) {
+    const fromA = actors[step.from] || { label: step.from, tech: "" };
+    const toA = actors[step.to] || { label: step.to, tech: "" };
+    const stageW = 200, stageH = 90, gap = 30;
+    const totalW = stageW * 4 + gap * 3;
+    const startX = (1200 - totalW) / 2;
+    const cy = 320;
+    const stages = [
+      { label: fromA.label || step.from, sub: fromA.tech || "" },
+      { label: "transform", sub: "stage 1" },
+      { label: "transform", sub: "stage 2" },
+      { label: toA.label || step.to, sub: toA.tech || "" }
+    ];
+    const cards = stages.map((s, i) => {
+      const cx = startX + i * (stageW + gap) + stageW / 2;
+      const g = makeActorCard(cx, cy, stageW, stageH, { label: s.label, sub: s.sub, tech: s.sub }, color);
+      root.appendChild(g);
+      // connector
+      if (i < stages.length - 1) {
+        const x1 = cx + stageW / 2, x2 = startX + (i + 1) * (stageW + gap) + stageW / 2 - stageW / 2;
+        root.appendChild(el("line", { x1, y1: cy, x2, y2: cy, stroke: color, "stroke-width": 2, "stroke-dasharray": "4 4" }));
+        root.appendChild(el("path", { d: `M ${x2} ${cy} L ${x2 - 8} ${cy - 5} L ${x2 - 8} ${cy + 5} Z`, fill: color }));
+      }
+      return { g, cx };
+    });
+
+    const pillText = step.transport || "pipeline";
+    const pillW = pillText.length * 7 + 28;
+    root.appendChild(el("rect", { x: 600 - pillW/2, y: cy - 130, width: pillW, height: 24, rx: 12, class: "transport-pill-bg", stroke: color }));
+    root.appendChild(el("text", { x: 600, y: cy - 114, class: "transport-pill-text", fill: color, text: pillText }));
+
+    const pkt = el("g");
+    pkt.appendChild(el("circle", { r: 14, fill: "url(#packetGlow)", opacity: "0.7" }));
+    pkt.appendChild(el("circle", { r: 7, class: "packet-shape", fill: "var(--packet)" }));
+    pkt.setAttribute("transform", `translate(${cards[0].cx + stageW/2}, ${cy})`);
+    root.appendChild(pkt);
+
+    let i = 0;
+    function hop() {
+      if (i >= cards.length - 1) {
+        pingActor(cards[cards.length - 1].g, color);
+        const speechG = el("g");
+        root.appendChild(speechG);
+        drawSpeechBubble(speechG, 600 - 220, cy + stageH/2 + 32, 440, step.payload || "", color, step.note, step.unknown ? (step.unknownReason || step.reason) : null);
+        return;
+      }
+      const x1 = cards[i].cx + stageW/2, x2 = cards[i+1].cx - stageW/2;
+      const d = `M ${x1} ${cy} L ${x2} ${cy}`;
+      animatePacket(pkt, d, Math.round(packetHopMs * 0.65), () => { pingActor(cards[i+1].g, color); i += 1; setTimeout(hop, 180); });
+    }
+    setTimeout(hop, 250);
+  }
+
+  // STATE — two states with a transition arrow
+  function renderStateScene(root, step, color) {
+    const fromA = actors[step.from] || { label: step.from, tech: "" };
+    const toA = actors[step.to] || { label: step.to, tech: "" };
+    const cy = 320;
+    const r = 80;
+    const beforeCx = 360, afterCx = 840;
+
+    // entity card on top
+    root.appendChild(makeActorCard(600, 130, 280, 70, { label: fromA.label || step.from, tech: fromA.tech || "owns the state" }, color));
+
+    // before circle
+    const beforeG = el("g");
+    beforeG.appendChild(el("circle", { cx: beforeCx, cy, r, fill: "var(--panel)", stroke: color, "stroke-width": 2 }));
+    beforeG.appendChild(el("text", { x: beforeCx, y: cy - 6, "text-anchor": "middle", fill: "var(--mute)", "font-size": 10, letterSpacing: "2", "font-family": "ui-monospace, monospace", text: "BEFORE" }));
+    beforeG.appendChild(el("text", { x: beforeCx, y: cy + 14, "text-anchor": "middle", fill: "var(--ink)", "font-size": 16, "font-weight": 700, "font-family": "ui-monospace, monospace", text: extractState(step.payload, "before") }));
+    root.appendChild(beforeG);
+
+    // after circle
+    const afterG = el("g");
+    afterG.appendChild(el("circle", { cx: afterCx, cy, r, fill: "var(--panel)", stroke: color, "stroke-width": 2 }));
+    afterG.appendChild(el("text", { x: afterCx, y: cy - 6, "text-anchor": "middle", fill: "var(--mute)", "font-size": 10, "font-family": "ui-monospace, monospace", text: "AFTER" }));
+    afterG.appendChild(el("text", { x: afterCx, y: cy + 14, "text-anchor": "middle", fill: color, "font-size": 16, "font-weight": 700, "font-family": "ui-monospace, monospace", text: extractState(step.payload, "after") }));
+    afterG.setAttribute("opacity", 0.25);
+    root.appendChild(afterG);
+
+    // transition arrow
+    const arcD = arcPath(beforeCx + r, cy, afterCx - r, cy, -70);
+    root.appendChild(el("path", { d: arcD, class: "arc", stroke: color }));
+    const labelX = (beforeCx + afterCx) / 2;
+    const lbl = step.transport || "transition";
+    const lblW = lbl.length * 7 + 28;
+    root.appendChild(el("rect", { x: labelX - lblW/2, y: cy - 80, width: lblW, height: 24, rx: 12, class: "transport-pill-bg", stroke: color }));
+    root.appendChild(el("text", { x: labelX, y: cy - 64, class: "transport-pill-text", fill: color, text: lbl }));
+
+    const pkt = el("g");
+    pkt.appendChild(el("circle", { r: 14, fill: "url(#packetGlow)", opacity: "0.7" }));
+    pkt.appendChild(el("circle", { r: 7, class: "packet-shape", fill: "var(--packet)" }));
+    pkt.setAttribute("transform", `translate(${beforeCx + r}, ${cy})`);
+    root.appendChild(pkt);
+
+    setTimeout(() => animatePacket(pkt, arcD, packetHopMs, () => {
+      pkt.remove();
+      afterG.style.transition = "opacity 0.5s ease";
+      afterG.setAttribute("opacity", 1);
+      beforeG.setAttribute("opacity", 0.4);
+      pingActor(afterG, color);
+      const speechG = el("g");
+      root.appendChild(speechG);
+      drawSpeechBubble(speechG, 600 - 220, cy + 100, 440, step.payload || "", color, step.note, step.unknown ? (step.unknownReason || step.reason) : null);
+    }), 300);
+  }
+
+  function extractState(payload, which) {
+    if (!payload) return which === "before" ? "?" : "?";
+    const m = String(payload).match(/(['"`]?\w+['"`]?)\s*(?:→|->|=>|to)\s*(['"`]?\w+['"`]?)/);
+    if (m) return which === "before" ? m[1].replace(/['"`]/g, "") : m[2].replace(/['"`]/g, "");
+    return which === "before" ? "—" : "✓";
+  }
+
+  // SCREENSHOT — image of the UI with a caption strip
+  function renderScreenshotScene(root, step, color) {
+    const fromA = actors[step.from] || { label: step.from, tech: "" };
+    const toA = actors[step.to] || { label: step.to, tech: "" };
+    const W = 1200, H = 600;
+    const imgW = 880, imgH = 480, imgX = (W - imgW) / 2, imgY = 60;
+
+    const frame = el("rect", { x: imgX - 10, y: imgY - 10, width: imgW + 20, height: imgH + 20, rx: 14, fill: "var(--panel-2)", stroke: color, "stroke-width": 2 });
+    root.appendChild(frame);
+
+    // browser chrome
+    root.appendChild(el("rect", { x: imgX, y: imgY, width: imgW, height: 28, fill: "var(--panel)", stroke: "var(--line)", "stroke-width": 1 }));
+    ["#ff5f57", "#ffbd2e", "#28c840"].forEach((c, i) => {
+      root.appendChild(el("circle", { cx: imgX + 14 + i * 16, cy: imgY + 14, r: 5, fill: c }));
+    });
+    const urlText = step.screenshotUrl || step.url || "";
+    if (urlText) {
+      root.appendChild(el("rect", { x: imgX + 70, y: imgY + 6, width: imgW - 90, height: 16, rx: 8, fill: "var(--bg)", stroke: "var(--line)", "stroke-width": 1 }));
+      root.appendChild(el("text", { x: imgX + 82, y: imgY + 18, fill: "var(--mute)", "font-size": 11, "font-family": "ui-monospace, monospace", text: urlText.length > 100 ? urlText.slice(0, 98) + "…" : urlText }));
+    }
+
+    const src = step.screenshot;
+    if (src) {
+      const img = document.createElementNS(NS, "image");
+      img.setAttributeNS("http://www.w3.org/1999/xlink", "href", src);
+      img.setAttribute("href", src);
+      img.setAttribute("x", imgX);
+      img.setAttribute("y", imgY + 28);
+      img.setAttribute("width", imgW);
+      img.setAttribute("height", imgH - 28);
+      img.setAttribute("preserveAspectRatio", "xMidYMin slice");
+      img.setAttribute("opacity", "0");
+      img.style.transition = "opacity 0.5s ease";
+      root.appendChild(img);
+      requestAnimationFrame(() => img.setAttribute("opacity", "1"));
+    } else {
+      root.appendChild(el("rect", { x: imgX, y: imgY + 28, width: imgW, height: imgH - 28, fill: "var(--bg)" }));
+      root.appendChild(el("text", { x: imgX + imgW/2, y: imgY + imgH/2, "text-anchor": "middle", fill: "var(--mute)", "font-size": 12, "font-family": "ui-monospace, monospace", text: "(screenshot pending — declare codestory.run to capture)" }));
+    }
+
+    // tiny actor strip below
+    const stripY = imgY + imgH + 30;
+    root.appendChild(el("rect", { x: imgX, y: stripY, width: imgW, height: 32, rx: 6, fill: "var(--panel)", stroke: "var(--line)", "stroke-width": 1 }));
+    root.appendChild(el("text", { x: imgX + 16, y: stripY + 20, fill: color, "font-size": 11, "font-weight": 700, "font-family": "ui-monospace, monospace", text: (fromA.label || step.from) + " → " + (toA.label || step.to) }));
+    const tcap = (step.transport || "") + "  " + (step.payload || "");
+    root.appendChild(el("text", { x: imgX + 200, y: stripY + 20, fill: "var(--mute)", "font-size": 11, "font-family": "ui-monospace, monospace", text: tcap.length > 110 ? tcap.slice(0, 108) + "…" : tcap }));
   }
 
   function makeActorCard(cx, cy, w, h, A, color) {
@@ -1415,12 +1840,15 @@
   function step(delta) {
     if (!currentFlow) return;
     pause();
+    const max = currentFlow.steps.length;
     if (playerMode === "overview") {
       playerMode = "scene";
       syncModeButton();
-      if (currentScene < 0) currentScene = delta > 0 ? 0 : -1;
+      // From overview, snap to the first scene on →, to the last on ←.
+      currentScene = delta > 0 ? 0 : max - 1;
+      renderScene();
+      return;
     }
-    const max = currentFlow.steps.length;
     currentScene = Math.max(-1, Math.min(max, currentScene + delta));
     renderScene();
   }
@@ -1436,6 +1864,21 @@
   document.getElementById("btn-replay").onclick = replay;
   document.getElementById("btn-exit").onclick = () => currentCat ? goCategory(currentCat.id) : goHome();
   document.getElementById("btn-mode").onclick = () => setPlayerMode(playerMode === "overview" ? "scene" : "overview");
+  document.getElementById("btn-prev").onclick = () => step(-1);
+  document.getElementById("btn-next").onclick = () => step(1);
+
+  function updateNavButtons() {
+    const prev = document.getElementById("btn-prev");
+    const next = document.getElementById("btn-next");
+    if (!prev || !next) return;
+    if (!currentFlow || playerMode === "overview") {
+      prev.disabled = true;
+      next.disabled = true;
+      return;
+    }
+    prev.disabled = currentScene <= -1;
+    next.disabled = currentScene >= currentFlow.steps.length;
+  }
 
   // SHORTCUTS PANEL
   let shortcutsFadeTimer = null;

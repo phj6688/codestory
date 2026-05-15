@@ -9,9 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-step visualizer library (`renderer/template.html`): nine viz types beyond the default packet-on-arc — `queue`, `broadcast`, `notification`, `db-write`, `db-read`, `pipeline`, `state`, `screenshot`, plus the existing `hop` / `self`. The skill picks one per step via the §3.1 chooser heuristic in SKILL.md; the renderer dispatches in `renderStep`. Eliminates the "every scene looks the same" failure mode.
+- Prev / next step navigation buttons in the player toolbar (`btn-prev`, `btn-next`), wired to the same `step(-1)` / `step(+1)` calls as the arrow keys, with disabled state on the overview view and at the flow boundaries.
+- Opt-in screenshot capture (SKILL.md §8.5): a `codestory.run` block in `package.json` / `pyproject.toml` declares `start`, `url`, `paths[]`. The skill starts the app, waits for readiness, drives Playwright at `1440×900`, base64-encodes the PNGs into `step.screenshot`, and shuts the process down. Strictly opt-in — no inference of run commands.
+- Language pin (SKILL.md §4): every render is one language, defaulting to English. `--lang <code>` flag or manifest entry overrides. Pre-save guard scans every narration / payload / note for off-language strings (Unicode-block + stopword heuristic) and rewrites before save, bounded to three passes per string. Closes the half-English / half-German output scar.
+- Schema docs: `references/schema.md` documents the new `viz`, `screenshot`, `screenshotUrl` fields and the chooser heuristic table.
+
 ### Changed
 
+- `step(delta)` in the renderer: from overview mode, → / ← now snap to scene 0 / last scene rather than double-advance past the intro. Prev / next buttons and arrow keys behave the same.
+- `renderScene` sets `data-viz` on the step label for every scene type (`intro`, `outro`, and each step viz) so a stale badge can never carry over between flows.
+
 ### Fixed
+
+- Off-by-one in `step()` when transitioning out of overview mode (the delta was applied twice — once by the overview-snap and once by the bounded clamp). Pressing → from overview now lands on scene 0, not scene 1.
 
 ## [0.2.0] - 2026-05-13
 
