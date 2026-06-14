@@ -49,7 +49,7 @@ Each service produces its own `codestory.html` next to its `pyproject.toml` (or 
 
 When a flow crosses service boundaries (orders calls payments calls notify), each service captures its own side of the wire. The reader follows the conversation by reading both books.
 
-This is the strategy the medchat repo uses internally: each major surface (`backend`, `frontend`, `iris`, `cortex`) would produce its own book; the medchat example in this repo is the single rendered book for the backend surface.
+This is the strategy the medchat repo uses internally: each major surface (`backend`, `frontend`, `iris`) would produce its own book; the medchat example in this repo is the single rendered book for the backend surface.
 
 ---
 
